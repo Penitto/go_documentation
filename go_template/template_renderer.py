@@ -79,17 +79,4 @@ def render_template(
         lines.append("`<Функции не обнаружены>`")
         lines.append("")
 
-    lines.append("## Взаимодействие в проекте")
-    if internal_imports:
-        imports_str = ", ".join(f"`{imp}`" for imp in internal_imports)
-        lines.append(f"- Внутренние пакеты и компоненты, с которыми связан файл: {imports_str}")
-    else:
-        lines.append("- Внутренние пакеты и компоненты, с которыми связан файл: `<нет>`")
-    if file_callers:
-        lines.append("- Кто вызывает этот файл/его функции:")
-        for caller in file_callers:
-            lines.append(f"  - {caller}")
-    else:
-        lines.append("- Кто вызывает этот файл/его функции: —")
-
     return "\n".join(lines).strip() + "\n"
