@@ -55,12 +55,12 @@ def render_template(
             receiver_display = f"{func['receiver']} " if func.get("receiver") else ""
             params_raw = func.get("params")
             returns_raw = func.get("returns")
-            param_display = params_raw if params_raw else "нет параметров"
-            return_display = returns_raw if returns_raw else "нет возвращаемых значений"
+            param_display = params_raw + ' — `<описание>`' if params_raw else "нет параметров"
+            return_display = returns_raw + ' — `<описание>`' if returns_raw else "нет возвращаемых значений"
             lines.append(f"### `func {receiver_display}{func.get('full_name', func.get('name', ''))}`")
             lines.append("- Назначение: `<описание>`")
-            lines.append(f"- Входные данные: `{param_display}` — `<описание>`")
-            lines.append(f"- Выходные данные: `{return_display}` — `<описание>`")
+            lines.append(f"- Входные данные: `{param_display}`")
+            lines.append(f"- Выходные данные: `{return_display}`")
             lines.append("- Внутренние переменные: `<описание>`")
             lines.append("- Внутренняя логика: `<описание>`")
             same_rel = func.get("relationship_same_file", "—")
