@@ -85,6 +85,8 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
         for func in funcs:
             func.setdefault("relationship_same_file", "—")
             func.setdefault("relationship_other_files", "—")
+            func.setdefault("other_file_calls_list", [])
+            func.setdefault("other_file_callers_list", [])
         logging.debug(
             "Parsed %d functions directly from source for %s",
             len(funcs),
@@ -93,6 +95,21 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
     for func in funcs:
         func.setdefault("receiver", func.get("receiver", ""))
         func.setdefault("full_name", func.get("full_name") or func.get("name", ""))
+        func.setdefault("other_file_calls_list", [])
+        func.setdefault("other_file_callers_list", [])
+
+    other_callers_set = set()
+    other_callees_set = set()
+    for func in funcs:
+        for label in func.get("other_file_callers_list", []):
+            other_callers_set.add(label)
+        for label in func.get("other_file_calls_list", []):
+            other_callees_set.add(label)
+
+    def _format_relationship_summary(values: set[str]) -> str:
+        if not values:
+            return "—"
+        return ", ".join(sorted(values, key=str.lower))
 
     internal_imports = sorted(set(internal_imports))
     logging.debug(
@@ -100,7 +117,16 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
         ", ".join(internal_imports) if internal_imports else "none",
     )
 
-    content = render_template(resolved_path, types, consts, vars_, funcs, internal_imports)
+    content = render_template(
+        resolved_path,
+        types,
+        consts,
+        vars_,
+        funcs,
+        internal_imports,
+        _format_relationship_summary(other_callers_set),
+        _format_relationship_summary(other_callees_set),
+    )
     if output_path is None:
         output_path = go_file.with_suffix(go_file.suffix + ".md")
     output_path.parent.mkdir(parents=True, exist_ok=True)

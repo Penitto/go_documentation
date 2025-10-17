@@ -12,6 +12,8 @@ def render_template(
     vars_: List[str],
     funcs: List[dict],
     internal_imports: List[str],
+    file_callers_summary: str,
+    file_callees_summary: str,
 ) -> str:
     today = datetime.date.today().strftime("%Y-%m-%d")
     try:
@@ -78,7 +80,7 @@ def render_template(
         lines.append(f"- Внутренние пакеты и компоненты, с которыми связан файл: {imports_str}")
     else:
         lines.append("- Внутренние пакеты и компоненты, с которыми связан файл: `<нет>`")
-    lines.append("- Кто вызывает этот файл/его функции: `<список>`")
-    lines.append("- Какие модули/сервисы зависят от результатов: `<описание>`")
+    lines.append(f"- Кто вызывает этот файл/его функции: {file_callers_summary}")
+    lines.append(f"- Какие модули/сервисы зависят от результатов: {file_callees_summary}")
 
     return "\n".join(lines).strip() + "\n"
