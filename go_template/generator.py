@@ -77,7 +77,11 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
     else:
         funcs = []
     if not funcs:
-        funcs = parse_functions(source, stripped)
+        try:
+            funcs = parse_functions(source, stripped)
+        except ValueError as exc:
+            logging.error("Failed to parse %s: %s", resolved_path, exc)
+            raise
         for func in funcs:
             func.setdefault("relationship_same_file", "—")
             func.setdefault("relationship_other_files", "—")

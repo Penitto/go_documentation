@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple
@@ -90,7 +91,11 @@ def build_repository_index(module_root: Optional[Path], module_path: Optional[st
         }
         import_path = _compute_import_path(module_path, module_root, go_path)
         rel_path = _compute_relative_path(module_root, go_path)
-        file_funcs = parse_functions(source, stripped)
+        try:
+            file_funcs = parse_functions(source, stripped)
+        except ValueError as exc:
+            logging.warning("Skipping %s during indexing: %s", go_path, exc)
+            continue
         for func in file_funcs:
             func["file_path"] = go_path
             func["dir_path"] = go_path.parent
