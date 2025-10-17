@@ -409,6 +409,21 @@ def _extract_function_body(source: str, idx: int) -> Tuple[str, int]:
             else:
                 idx = _skip_string(source, idx, source[idx])
             continue
+        if source[idx] == "/" and idx + 1 < length:
+            nxt = source[idx + 1]
+            if nxt == "/":
+                idx += 2
+                while idx < length and source[idx] != "\n":
+                    idx += 1
+                continue
+            if nxt == "*":
+                idx += 2
+                while idx < length - 1:
+                    if source[idx] == "*" and source[idx + 1] == "/":
+                        idx += 2
+                        break
+                    idx += 1
+                continue
         idx += 1
     if idx >= length or source[idx] != "{":
         return "", idx
@@ -437,6 +452,21 @@ def _extract_function_body(source: str, idx: int) -> Tuple[str, int]:
         if ch == "`":
             i = _skip_raw_string(source, i)
             continue
+        if ch == "/" and i + 1 < length:
+            nxt = source[i + 1]
+            if nxt == "/":
+                i += 2
+                while i < length and source[i] != "\n":
+                    i += 1
+                continue
+            if nxt == "*":
+                i += 2
+                while i < length - 1:
+                    if source[i] == "*" and source[i + 1] == "/":
+                        i += 2
+                        break
+                    i += 1
+                continue
         i += 1
 
     # If we reach here the braces were not balanced; capture until EOF.
