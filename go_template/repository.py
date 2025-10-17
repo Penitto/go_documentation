@@ -70,8 +70,10 @@ def build_repository_index(module_root: Optional[Path], module_path: Optional[st
     functions_by_file: Dict[Path, List[dict]] = defaultdict(list)
     functions_by_dir_name: Dict[Tuple[Path, str], List[dict]] = defaultdict(list)
     functions_by_import_path_name: Dict[Tuple[str, str], List[dict]] = defaultdict(list)
+    functions_by_rel_path_name: Dict[Tuple[str, str], List[dict]] = defaultdict(list)
     file_alias_maps: Dict[Path, dict] = {}
     registry: Dict[Tuple[str, str, str], dict] = {}
+    rel_paths_present: Set[str] = set()
 
     for go_path in _iter_go_files(module_root):
         try:
@@ -87,12 +89,14 @@ def build_repository_index(module_root: Optional[Path], module_path: Optional[st
             "internal_alias_map": internal_alias_map,
         }
         import_path = _compute_import_path(module_path, module_root, go_path)
+        rel_path = _compute_relative_path(module_root, go_path)
         file_funcs = parse_functions(source, stripped)
         for func in file_funcs:
             func["file_path"] = go_path
             func["dir_path"] = go_path.parent
             func["package"] = package_name
             func["import_path"] = import_path
+            func["rel_path"] = rel_path
             key = _make_function_key(func)
             func["key"] = key
             functions.append(func)
@@ -101,12 +105,18 @@ def build_repository_index(module_root: Optional[Path], module_path: Optional[st
             functions_by_dir_name[(go_path.parent, func["name"])].append(func)
             if not func.get("receiver_type") and import_path:
                 functions_by_import_path_name[(import_path, func["name"])].append(func)
+            if rel_path is not None:
+                functions_by_rel_path_name[(rel_path, func["name"])].append(func)
+                rel_paths_present.add(rel_path)
 
     call_edges = _build_call_graph(
         functions,
         file_alias_maps,
         functions_by_dir_name,
         functions_by_import_path_name,
+        functions_by_rel_path_name,
+        rel_paths_present,
+        module_path,
     )
     reverse_edges = _invert_call_graph(call_edges)
     attach_relationship_summaries(functions, call_edges, reverse_edges, registry, module_root)
@@ -169,6 +179,9 @@ def _build_call_graph(
     file_alias_maps: Dict[Path, dict],
     functions_by_dir_name: Dict[Tuple[Path, str], List[dict]],
     functions_by_import_path_name: Dict[Tuple[str, str], List[dict]],
+    functions_by_rel_path_name: Dict[Tuple[str, str], List[dict]],
+    rel_paths_present: Set[str],
+    module_path: Optional[str],
 ) -> Dict[Tuple[str, str, str], Set[Tuple[str, str, str]]]:
     call_edges: Dict[Tuple[str, str, str], Set[Tuple[str, str, str]]] = defaultdict(set)
     for func in functions:
@@ -182,11 +195,18 @@ def _build_call_graph(
             for target in functions_by_dir_name.get((func["dir_path"], name), []):
                 call_edges[func["key"]].add(target["key"])
         file_context = file_alias_maps.get(func["file_path"], {})
-        internal_alias_map = file_context.get("internal_alias_map", {})
-        selector_calls = _find_selector_calls(sanitized, internal_alias_map)
+        alias_map = file_context.get("alias_map", {})
+        selector_calls = _find_selector_calls(sanitized, alias_map)
         for import_path, called_name in selector_calls:
             for target in functions_by_import_path_name.get((import_path, called_name), []):
                 call_edges[func["key"]].add(target["key"])
+            for rel_path in _match_import_to_rel_paths(
+                import_path,
+                rel_paths_present,
+                module_path,
+            ):
+                for target in functions_by_rel_path_name.get((rel_path, called_name), []):
+                    call_edges[func["key"]].add(target["key"])
     return call_edges
 
 
@@ -213,15 +233,15 @@ def _find_simple_calls(body: str) -> Set[str]:
     return names
 
 
-def _find_selector_calls(body: str, internal_alias_map: Dict[str, str]) -> Set[Tuple[str, str]]:
-    if not internal_alias_map:
+def _find_selector_calls(body: str, alias_map: Dict[str, str]) -> Set[Tuple[str, str]]:
+    if not alias_map:
         return set()
     calls: Set[Tuple[str, str]] = set()
     for match in SELECTOR_CALL_PATTERN.finditer(body):
         alias = match.group(1)
         name = match.group(2)
-        if alias in internal_alias_map:
-            calls.add((internal_alias_map[alias], name))
+        if alias in alias_map:
+            calls.add((alias_map[alias], name))
     return calls
 
 
@@ -371,3 +391,35 @@ def _relative_path(path: Path, base: Path) -> str:
 def _make_function_key(func: dict) -> Tuple[str, str, str]:
     receiver = func.get("receiver_type") or ""
     return (str(func.get("file_path")), func["name"], receiver)
+
+
+def _compute_relative_path(module_root: Path, file_path: Path) -> Optional[str]:
+    try:
+        rel = file_path.parent.relative_to(module_root).as_posix()
+        return rel or ""
+    except ValueError:
+        return None
+
+
+def _match_import_to_rel_paths(
+    import_path: str,
+    rel_paths_present: Set[str],
+    module_path: Optional[str],
+) -> Set[str]:
+    matches: Set[str] = set()
+    if not import_path:
+        return matches
+    candidates: List[str] = []
+    segments = import_path.split("/")
+    for i in range(len(segments)):
+        suffix = "/".join(segments[i:])
+        candidates.append(suffix)
+    if module_path:
+        prefix = module_path + "/"
+        if import_path.startswith(prefix):
+            rel_candidate = import_path[len(prefix) :]
+            candidates.append(rel_candidate)
+    for candidate in candidates:
+        if candidate in rel_paths_present:
+            matches.add(candidate)
+    return matches

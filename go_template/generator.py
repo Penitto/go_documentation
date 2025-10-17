@@ -15,6 +15,19 @@ from .repository import build_repository_index
 from .template_renderer import render_template
 
 
+def _find_repository_root(start: Path) -> Path:
+    start = start.resolve()
+    for parent in [start, *start.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    cwd = Path.cwd().resolve()
+    try:
+        start.relative_to(cwd)
+        return cwd
+    except ValueError:
+        return start
+
+
 def generate_documentation(go_file: Path, output_path: Optional[Path] = None) -> Path:
     if not go_file.is_file():
         raise FileNotFoundError(f"{go_file} is not a file")
@@ -23,6 +36,8 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
     stripped = strip_comments_preserve_whitespace(source)
     types, consts, vars_ = extract_declarations(stripped)
     module_path, module_root = find_module_info(go_file.parent.resolve())
+    if module_root is None:
+        module_root = _find_repository_root(go_file.parent)
     imports = parse_imports(source)
     internal_imports = filter_internal_imports(imports, module_path)
 
