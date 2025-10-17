@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import re
+import logging
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
+
+
+logger = logging.getLogger(__name__)
 
 
 def strip_comments_preserve_whitespace(source: str) -> str:
@@ -267,26 +271,64 @@ def extract_balanced(source: str, start: int, open_char: str, close_char: str) -
 def parse_functions(source: str, stripped_source: str) -> List[dict]:
     funcs: List[dict] = []
     depth = 0
+    brace_stack: List[int] = []
     i = 0
     length = len(stripped_source)
     while i < length:
         ch = stripped_source[i]
+        if ch == '"':
+            i = _skip_string(stripped_source, i, '"')
+            continue
+        if ch == "'":
+            i = _skip_string(stripped_source, i, "'")
+            continue
+        if ch == "`":
+            i = _skip_raw_string(stripped_source, i)
+            continue
         if ch == "{":
             depth += 1
+            brace_stack.append(i)
             i += 1
             continue
         if ch == "}":
-            depth = max(depth - 1, 0)
+            if depth > 0:
+                depth -= 1
+            if brace_stack:
+                brace_stack.pop()
             i += 1
             continue
         if depth == 0 and stripped_source.startswith("func", i):
             before = stripped_source[i - 1] if i > 0 else " "
             after = stripped_source[i + 4] if i + 4 < length else " "
             if before not in "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" and after in " \t(":
-                func_info, next_i = _parse_single_func(source, i)
-                funcs.append(func_info)
-                i = next_i
+                try:
+                    func_info, next_i = _parse_single_func(source, i)
+                except ValueError as exc:
+                    logger.warning(
+                        "Skipping malformed function starting near %d: %s",
+                        i,
+                        exc,
+                    )
+                    i += len("func")
+                    continue
+                else:
+                    funcs.append(func_info)
+                    i = next_i
                 continue
+        elif stripped_source.startswith("func", i):
+            # Allow recovery if we encounter a top-level func while depth > 0 (likely missing braces).
+            j = i - 1
+            while j >= 0 and stripped_source[j] in " \t":
+                j -= 1
+            if j < 0 or stripped_source[j] in "\n;":
+                if depth != 0:
+                    logger.warning(
+                        "Assuming recovery from unmatched braces before position %d",
+                        i,
+                    )
+                    depth = 0
+                    brace_stack.clear()
+                continue  # re-evaluate in next iteration with depth reset
         i += 1
     return funcs
 
@@ -340,12 +382,7 @@ def _parse_single_func(source: str, start_idx: int) -> Tuple[dict, int]:
         returns = "".join(return_buffer).strip()
         idx = _skip_whitespace(source, idx)
 
-    body_text = ""
-    while idx < length and source[idx] != "{":
-        idx += 1
-    if idx < length and source[idx] == "{":
-        body_segment, idx = extract_balanced(source, idx, "{", "}")
-        body_text = body_segment
+    body_text, idx = _extract_function_body(source, idx)
 
     full_name = name + (generics if generics else "")
     receiver_type = _extract_receiver_type(receiver)
@@ -361,6 +398,51 @@ def _parse_single_func(source: str, start_idx: int) -> Tuple[dict, int]:
         },
         idx,
     )
+
+
+def _extract_function_body(source: str, idx: int) -> Tuple[str, int]:
+    length = len(source)
+    while idx < length and source[idx] != "{":
+        if source[idx] in "\"'`":
+            if source[idx] == "`":
+                idx = _skip_raw_string(source, idx)
+            else:
+                idx = _skip_string(source, idx, source[idx])
+            continue
+        idx += 1
+    if idx >= length or source[idx] != "{":
+        return "", idx
+
+    start = idx
+    depth = 0
+    i = idx
+    while i < length:
+        ch = source[i]
+        if ch == "{":
+            depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            i += 1
+            if depth == 0:
+                return source[start:i], i
+            continue
+        if ch == '"':
+            i = _skip_string(source, i, '"')
+            continue
+        if ch == "'":
+            i = _skip_string(source, i, "'")
+            continue
+        if ch == "`":
+            i = _skip_raw_string(source, i)
+            continue
+        i += 1
+
+    # If we reach here the braces were not balanced; capture until EOF.
+    logger.warning("Function body starting at %d reached EOF without closing brace", start)
+    return source[start:], length
+
 
 
 def _skip_whitespace(source: str, idx: int) -> int:

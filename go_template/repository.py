@@ -332,19 +332,25 @@ def attach_relationship_summaries(
         other_callers_unique = _sorted_unique(other_callers)
         func["other_file_calls_list"] = other_calls_unique
         func["other_file_callers_list"] = other_callers_unique
-        func["relationship_same_file"] = _summarize_relations(same_file_calls, same_file_callers)
-        func["relationship_other_files"] = _summarize_relations(other_calls_unique, other_callers_unique)
+        func["relationship_same_file"] = _summarize_relations(
+            _sorted_unique(same_file_calls),
+            _sorted_unique(same_file_callers),
+        )
+        func["relationship_other_files"] = _summarize_relations(
+            other_calls_unique,
+            other_callers_unique,
+        )
 
 
 def _summarize_relations(calls: List[str], callers: List[str]) -> str:
     parts: List[str] = []
-    unique_calls = _sorted_unique(calls)
-    if unique_calls:
-        parts.append("Вызывает → " + ", ".join(unique_calls))
-    unique_callers = _sorted_unique(callers)
-    if unique_callers:
-        parts.append("← Вызывают: " + ", ".join(unique_callers))
-    return " | ".join(parts) if parts else "—"
+    if calls:
+        call_lines = "\n".join(f"  - {value}" for value in calls)
+        parts.append("Вызывает:\n" + call_lines)
+    if callers:
+        caller_lines = "\n".join(f"  - {value}" for value in callers)
+        parts.append("Вызывают:\n" + caller_lines)
+    return "\n".join(parts) if parts else "—"
 
 
 def _sorted_unique(items: List[str]) -> List[str]:

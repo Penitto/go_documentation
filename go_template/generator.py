@@ -98,18 +98,10 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
         func.setdefault("other_file_calls_list", [])
         func.setdefault("other_file_callers_list", [])
 
-    other_callers_set = set()
-    other_callees_set = set()
-    for func in funcs:
-        for label in func.get("other_file_callers_list", []):
-            other_callers_set.add(label)
-        for label in func.get("other_file_calls_list", []):
-            other_callees_set.add(label)
-
-    def _format_relationship_summary(values: set[str]) -> str:
-        if not values:
-            return "—"
-        return ", ".join(sorted(values, key=str.lower))
+    other_callers: List[str] = sorted(
+        {label for func in funcs for label in func.get("other_file_callers_list", [])},
+        key=str.lower,
+    )
 
     internal_imports = sorted(set(internal_imports))
     logging.debug(
@@ -124,8 +116,7 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
         vars_,
         funcs,
         internal_imports,
-        _format_relationship_summary(other_callers_set),
-        _format_relationship_summary(other_callees_set),
+        other_callers,
     )
     if output_path is None:
         output_path = go_file.with_suffix(go_file.suffix + ".md")

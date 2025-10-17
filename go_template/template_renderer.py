@@ -12,8 +12,7 @@ def render_template(
     vars_: List[str],
     funcs: List[dict],
     internal_imports: List[str],
-    file_callers_summary: str,
-    file_callees_summary: str,
+    file_callers: List[str],
 ) -> str:
     today = datetime.date.today().strftime("%Y-%m-%d")
     try:
@@ -64,8 +63,14 @@ def render_template(
             lines.append("- Внутренняя логика: `<описание>`")
             same_rel = func.get("relationship_same_file", "—")
             other_rel = func.get("relationship_other_files", "—")
-            lines.append(f"- Взаимосвязь с другими функциями файла: {same_rel}")
-            lines.append(f"- Взаимосвязь с другими функциями из других файлов: {other_rel}")
+            lines.append("- Взаимосвязь с другими функциями файла:" if same_rel != "—" else "- Взаимосвязь с другими функциями файла: —")
+            if same_rel != "—":
+                for sub_line in same_rel.splitlines():
+                    lines.append(f"  {sub_line}")
+            lines.append("- Взаимосвязь с другими функциями из других файлов:" if other_rel != "—" else "- Взаимосвязь с другими функциями из других файлов: —")
+            if other_rel != "—":
+                for sub_line in other_rel.splitlines():
+                    lines.append(f"  {sub_line}")
             lines.append("- Связь с бизнес-процессом: `<описание>`")
             lines.append("- Предусловия: `<описание>`")
             lines.append("- Постусловия: `<описание>`")
@@ -80,7 +85,11 @@ def render_template(
         lines.append(f"- Внутренние пакеты и компоненты, с которыми связан файл: {imports_str}")
     else:
         lines.append("- Внутренние пакеты и компоненты, с которыми связан файл: `<нет>`")
-    lines.append(f"- Кто вызывает этот файл/его функции: {file_callers_summary}")
-    lines.append(f"- Какие модули/сервисы зависят от результатов: {file_callees_summary}")
+    if file_callers:
+        lines.append("- Кто вызывает этот файл/его функции:")
+        for caller in file_callers:
+            lines.append(f"  - {caller}")
+    else:
+        lines.append("- Кто вызывает этот файл/его функции: —")
 
     return "\n".join(lines).strip() + "\n"
