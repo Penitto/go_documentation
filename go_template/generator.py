@@ -119,7 +119,7 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
         other_callers,
     )
     if output_path is None:
-        output_path = go_file.with_suffix(go_file.suffix + ".md")
+        output_path = go_file.with_name(f"{go_file.stem}.doc.md")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(content, encoding="utf-8")
     logging.info("Documentation written to %s", output_path)

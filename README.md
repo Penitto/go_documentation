@@ -22,7 +22,7 @@
 python3 generate_template.py path/to/file.go
 ```
 
-По умолчанию шаблон располагается рядом с исходником и получает суффикс `.go.md`. Чтобы указать другой путь:
+По умолчанию шаблон располагается рядом с исходником и получает имя `<file>.doc.md`. Чтобы указать другой путь:
 
 ```bash
 python3 generate_template.py path/to/file.go --out docs/file-doc.md

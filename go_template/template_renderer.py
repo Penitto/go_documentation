@@ -21,10 +21,10 @@ def render_template(
         rel_path = file_path.as_posix()
 
     lines: List[str] = []
-    lines.append("# Название файла")
-    lines.append(f"- Полный путь: `{rel_path}`")
-    lines.append(f"- Дата/версия документации: `<{today} | vX.Y>`")
-    lines.append("")
+    # lines.append("# Название файла")
+    # lines.append(f"- Полный путь: `{rel_path}`")
+    # lines.append(f"- Дата/версия документации: `<{today} | vX.Y>`")
+    # lines.append("")
     lines.append("## Назначение файла")
     lines.append("- Общая роль в проекте: `<описание>`")
     lines.append("")
@@ -53,8 +53,10 @@ def render_template(
         lines.append("")
         for func in funcs:
             receiver_display = f"{func['receiver']} " if func.get("receiver") else ""
-            param_display = func.get("params") or "—"
-            return_display = func.get("returns") or "—"
+            params_raw = func.get("params")
+            returns_raw = func.get("returns")
+            param_display = params_raw if params_raw else "нет параметров"
+            return_display = returns_raw if returns_raw else "нет возвращаемых значений"
             lines.append(f"### `func {receiver_display}{func.get('full_name', func.get('name', ''))}`")
             lines.append("- Назначение: `<описание>`")
             lines.append(f"- Входные данные: `{param_display}` — `<описание>`")

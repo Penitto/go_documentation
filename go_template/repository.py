@@ -349,7 +349,7 @@ def _summarize_relations(calls: List[str], callers: List[str]) -> str:
         parts.append("- Вызывает:\n" + call_lines)
     if callers:
         caller_lines = "\n".join(f"  - {value}" for value in callers)
-        parts.append("- Вызывают:\n" + caller_lines)
+        parts.append("- Используется в:\n" + caller_lines)
     return "\n".join(parts) if parts else "—"
 
 
