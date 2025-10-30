@@ -143,7 +143,10 @@ def _iter_go_files(root: Path) -> Iterator[Path]:
             rel_parts = path.relative_to(root).parts
         except ValueError:
             rel_parts = path.parts
-        if any(part in {"vendor", "testdata"} for part in rel_parts):
+        if any(
+            part in {"vendor", "testdata", ".ipynb_checkpoints", "__pycache__"}
+            for part in rel_parts
+        ):
             continue
         yield path
 
