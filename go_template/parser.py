@@ -141,7 +141,7 @@ def _extract_identifier_list(fragment: str) -> List[str]:
         name = part.strip()
         if name:
             primary = name.split(None, 1)[0]
-            if primary:
+            if primary and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", primary):
                 identifiers.append(primary)
     return identifiers
 
