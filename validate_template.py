@@ -11,7 +11,10 @@ import tempfile
 from pathlib import Path
 from typing import List
 
-from go_template.generator import generate_documentation
+try:
+    from go_template.generator import generate_documentation
+except ModuleNotFoundError:
+    from go_documentation.go_template.generator import generate_documentation  # type: ignore
 
 PLACEHOLDER_REGEX = re.compile(r"(—|<[^>]+>)")
 
@@ -66,6 +69,14 @@ def compare_lines(template_line: str, actual_line: str, line_no: int) -> list[st
             return issues
         cursor += len(segment)
         placeholder = match.group()
+        if placeholder.lower() == "<нет>":
+            if not actual_line.startswith(placeholder, cursor):
+                issues.append(
+                    f"Line {line_no}: expected literal '{placeholder}'"
+                )
+            cursor += len(placeholder)
+            last_end = match.end()
+            continue
         next_start = matches[idx + 1].start() if idx + 1 < len(matches) else len(
             template_line
         )
