@@ -17,6 +17,7 @@ except ModuleNotFoundError:
     from go_documentation.go_template.generator import generate_documentation  # type: ignore
 
 PLACEHOLDER_REGEX = re.compile(r"(—|<[^>]+>)")
+MULTILINE_DETAIL_RE = re.compile(r"^\s{2,}[-*•] ")
 
 
 def generate_reference_template(go_file: Path) -> List[str]:
@@ -129,17 +130,26 @@ def validate_document(go_file: Path, doc_file: Path) -> list[str]:
     except FileNotFoundError:
         return [f"Documentation file '{doc_file}' does not exist"]
 
-    if len(template_lines) != len(doc_lines):
-        issues.append(
-            f"Line count mismatch: expected {len(template_lines)} lines, found {len(doc_lines)}"
-        )
-    limit = min(len(template_lines), len(doc_lines))
-    for idx in range(limit):
-        issues.extend(compare_lines(template_lines[idx], doc_lines[idx], idx + 1))
+    t_idx = 0
+    d_idx = 0
+    while t_idx < len(template_lines) and d_idx < len(doc_lines):
+        tpl_line = template_lines[t_idx]
+        doc_line = doc_lines[d_idx]
+        issues.extend(compare_lines(tpl_line, doc_line, d_idx + 1))
+        t_idx += 1
+        d_idx += 1
+        if tpl_line.startswith("- Внутренняя логика:"):
+            while d_idx < len(doc_lines) and MULTILINE_DETAIL_RE.match(doc_lines[d_idx]):
+                d_idx += 1
 
-    if len(doc_lines) > len(template_lines):
-        for extra_idx in range(len(template_lines) + 1, len(doc_lines) + 1):
-            issues.append(f"Line {extra_idx}: unexpected extra content")
+    if t_idx < len(template_lines):
+        for missing_idx in range(t_idx, len(template_lines)):
+            issues.append(
+                f"Line {missing_idx + 1}: expected '{template_lines[missing_idx]}'"
+            )
+    while d_idx < len(doc_lines):
+        issues.append(f"Line {d_idx + 1}: unexpected extra content")
+        d_idx += 1
 
     return issues
 
