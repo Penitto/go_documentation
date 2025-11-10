@@ -69,7 +69,11 @@ def render_template(
             if same_rel != "—":
                 for sub_line in same_rel.splitlines():
                     lines.append(f"  {sub_line}")
-            lines.append("- Взаимосвязь с другими функциями из других файлов:" if other_rel != "—" else "- Взаимосвязь с другими функциями из других файлов: —")
+            lines.append(
+                "- Взаимосвязь с другими функциями из других файлов:"
+                if other_rel != "—"
+                else "- Взаимосвязь с другими функциями из других файлов: `<нет>`"
+            )
             if other_rel != "—":
                 for sub_line in other_rel.splitlines():
                     lines.append(f"  {sub_line}")
