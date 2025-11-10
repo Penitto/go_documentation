@@ -47,12 +47,18 @@ def is_placeholder_value_valid(value: str) -> bool:
     return True
 
 
+def _strip_backticks(value: str) -> str:
+    return value.replace("`", "")
+
+
 def compare_lines(template_line: str, actual_line: str, line_no: int) -> list[str]:
     """Compare a single line, returning a list of issues."""
     issues: List[str] = []
-    matches = list(PLACEHOLDER_REGEX.finditer(template_line))
+    template_clean = _strip_backticks(template_line)
+    actual_clean = _strip_backticks(actual_line)
+    matches = list(PLACEHOLDER_REGEX.finditer(template_clean))
     if not matches:
-        if template_line != actual_line:
+        if template_clean != actual_clean:
             issues.append(
                 f"Line {line_no}: expected '{template_line}' but found '{actual_line}'"
             )
@@ -61,8 +67,8 @@ def compare_lines(template_line: str, actual_line: str, line_no: int) -> list[st
     cursor = 0
     last_end = 0
     for idx, match in enumerate(matches):
-        segment = template_line[last_end:match.start()]
-        if not actual_line.startswith(segment, cursor):
+        segment = template_clean[last_end:match.start()]
+        if not actual_clean.startswith(segment, cursor):
             issues.append(
                 f"Line {line_no}: expected segment '{segment}' before placeholder"
             )
@@ -70,7 +76,7 @@ def compare_lines(template_line: str, actual_line: str, line_no: int) -> list[st
         cursor += len(segment)
         placeholder = match.group()
         if placeholder.lower() == "<нет>":
-            if not actual_line.startswith(placeholder, cursor):
+            if not actual_clean.startswith(placeholder, cursor):
                 issues.append(
                     f"Line {line_no}: expected literal '{placeholder}'"
                 )
@@ -78,21 +84,21 @@ def compare_lines(template_line: str, actual_line: str, line_no: int) -> list[st
             last_end = match.end()
             continue
         next_start = matches[idx + 1].start() if idx + 1 < len(matches) else len(
-            template_line
+            template_clean
         )
-        next_segment = template_line[match.end():next_start]
+        next_segment = template_clean[match.end():next_start]
         if next_segment:
-            next_pos = actual_line.find(next_segment, cursor)
+            next_pos = actual_clean.find(next_segment, cursor)
             if next_pos == -1:
                 issues.append(
                     f"Line {line_no}: expected segment '{next_segment}' after placeholder '{placeholder}'"
                 )
                 return issues
-            value = actual_line[cursor:next_pos]
+            value = actual_clean[cursor:next_pos]
             cursor = next_pos
         else:
-            value = actual_line[cursor:]
-            cursor = len(actual_line)
+            value = actual_clean[cursor:]
+            cursor = len(actual_clean)
         if not is_placeholder_value_valid(value):
             issues.append(
                 f"Line {line_no}: placeholder '{placeholder}' not replaced with meaningful content"
@@ -100,14 +106,14 @@ def compare_lines(template_line: str, actual_line: str, line_no: int) -> list[st
             return issues
         last_end = match.end()
 
-    remaining = template_line[last_end:]
-    if not actual_line.startswith(remaining, cursor):
+    remaining = template_clean[last_end:]
+    if not actual_clean.startswith(remaining, cursor):
         issues.append(
             f"Line {line_no}: expected trailing segment '{remaining}'"
         )
         return issues
     cursor += len(remaining)
-    if cursor != len(actual_line):
+    if cursor != len(actual_clean):
         issues.append(
             f"Line {line_no}: unexpected extra content after '{remaining}'"
         )
