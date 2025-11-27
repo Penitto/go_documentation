@@ -18,6 +18,7 @@ except ModuleNotFoundError:
 
 PLACEHOLDER_REGEX = re.compile(r"(—|<[^>]+>)")
 MULTILINE_DETAIL_RE = re.compile(r"^\s{2,}[-*•] ")
+CONTINUATION_RE = re.compile(r"^\s+\S.*$")
 
 
 def generate_reference_template(go_file: Path) -> List[str]:
@@ -76,12 +77,27 @@ def compare_lines(template_line: str, actual_line: str, line_no: int) -> list[st
             return issues
         cursor += len(segment)
         placeholder = match.group()
-        if placeholder.lower() == "<нет>":
-            if not actual_clean.startswith(placeholder, cursor):
+        trailing_text = template_clean[match.end():].strip()
+        if placeholder.lower() == "<нет>" or (
+            placeholder == "—" and trailing_text
+        ):
+            literal = placeholder if placeholder != "—" else "—"
+            if not actual_clean.startswith(literal, cursor):
                 issues.append(
-                    f"Line {line_no}: expected literal '{placeholder}'"
+                    f"Line {line_no}: expected literal '{literal}'"
                 )
-            cursor += len(placeholder)
+                return issues
+            cursor += len(literal)
+            last_end = match.end()
+            continue
+        if placeholder == "—" and not trailing_text:
+            value = actual_clean[cursor:]
+            cursor = len(actual_clean)
+            if not is_placeholder_value_valid(value):
+                issues.append(
+                    f"Line {line_no}: placeholder '{placeholder}' not replaced with meaningful content"
+                )
+                return issues
             last_end = match.end()
             continue
         next_start = matches[idx + 1].start() if idx + 1 < len(matches) else len(
@@ -141,6 +157,8 @@ def validate_document(go_file: Path, doc_file: Path) -> list[str]:
         if tpl_line.startswith("- Внутренняя логика:"):
             while d_idx < len(doc_lines) and MULTILINE_DETAIL_RE.match(doc_lines[d_idx]):
                 d_idx += 1
+        while d_idx < len(doc_lines) and CONTINUATION_RE.match(doc_lines[d_idx]):
+            d_idx += 1
 
     if t_idx < len(template_lines):
         for missing_idx in range(t_idx, len(template_lines)):
