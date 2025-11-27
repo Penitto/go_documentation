@@ -32,19 +32,19 @@ def render_template(
     if types:
         lines.append("- Ключевые типы (структуры, интерфейсы, алиасы) и их задачи:")
         for name in types:
-            lines.append(f"  - `{name}` — `<назначение>`")
+            lines.append(f"  - `{name}` — `<описание>`")
     else:
         lines.append("- Ключевые типы (структуры, интерфейсы, алиасы) и их задачи: `<нет>`")
     if consts:
         lines.append("- Глобальные константы и их значение:")
         for name in consts:
-            lines.append(f"  - `{name}` — `<назначение>`")
+            lines.append(f"  - `{name}` — `<описание>`")
     else:
         lines.append("- Глобальные константы и их значение: `<нет>`")
     if vars_:
         lines.append("- Глобальные переменные и их значение:")
         for name in vars_:
-            lines.append(f"  - `{name}` — `<назначение>`")
+            lines.append(f"  - `{name}` — `<описание>`")
     else:
         lines.append("- Глобальные переменные и их значение: `<нет>`")
     lines.append("")
