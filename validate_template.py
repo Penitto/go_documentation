@@ -44,6 +44,8 @@ def is_placeholder_value_valid(value: str) -> bool:
         return False
     if stripped == "—":
         return False
+    if stripped.lower() == "<нет>":
+        return True
     if "<" in stripped and ">" in stripped:
         return False
     return True
@@ -149,6 +151,30 @@ def validate_document(go_file: Path, doc_file: Path) -> list[str]:
     t_idx = 0
     d_idx = 0
     while t_idx < len(template_lines) and d_idx < len(doc_lines):
+        while t_idx < len(template_lines) and template_lines[t_idx].strip() == "":
+            t_idx += 1
+        while d_idx < len(doc_lines) and doc_lines[d_idx].strip() == "":
+            d_idx += 1
+        if t_idx >= len(template_lines) or d_idx >= len(doc_lines):
+            break
+        # Skip extra empty lines in the document if the template expects content.
+        while (
+            d_idx < len(doc_lines)
+            and doc_lines[d_idx].strip() == ""
+            and template_lines[t_idx].strip() != ""
+        ):
+            d_idx += 1
+        # Align paired empty lines.
+        if (
+            t_idx < len(template_lines)
+            and template_lines[t_idx].strip() == ""
+            and d_idx < len(doc_lines)
+            and doc_lines[d_idx].strip() == ""
+        ):
+            t_idx += 1
+            d_idx += 1
+            continue
+
         tpl_line = template_lines[t_idx]
         doc_line = doc_lines[d_idx]
         issues.extend(compare_lines(tpl_line, doc_line, d_idx + 1))
@@ -157,8 +183,14 @@ def validate_document(go_file: Path, doc_file: Path) -> list[str]:
         if tpl_line.startswith("- Внутренняя логика:"):
             while d_idx < len(doc_lines) and MULTILINE_DETAIL_RE.match(doc_lines[d_idx]):
                 d_idx += 1
-        while d_idx < len(doc_lines) and CONTINUATION_RE.match(doc_lines[d_idx]):
-            d_idx += 1
+        if PLACEHOLDER_REGEX.search(tpl_line):
+            while d_idx < len(doc_lines) and CONTINUATION_RE.match(doc_lines[d_idx]):
+                d_idx += 1
+            while d_idx < len(doc_lines):
+                stripped = doc_lines[d_idx].lstrip()
+                if stripped.startswith("-") or stripped.startswith("#"):
+                    break
+                d_idx += 1
 
     if t_idx < len(template_lines):
         for missing_idx in range(t_idx, len(template_lines)):
