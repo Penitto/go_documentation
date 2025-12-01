@@ -34,6 +34,60 @@ python3 generate_template.py path/to/file.go --out docs/file-doc.md
 python3 generate_template.py --log-level DEBUG path/to/file.go
 ```
 
+### Обход плейсхолдеров в готовом шаблоне
+
+Когда шаблон уже создан, можно перечислить все `<<FILL ...>>` с номерами строк:
+
+```bash
+python3 iterate_template.py path/to/file.doc.md
+```
+
+Для машинной обработки есть JSON-вывод:
+
+```bash
+python3 iterate_template.py --json path/to/file.doc.md
+```
+
+### Поочередный обход функций с учётом правок
+
+Скрипт `iterate_functions.py` возвращает следующую функцию в шаблоне и её диапазон строк,
+перечитывая файл при каждом запуске, поэтому сдвиги строк после ручных правок учитываются:
+
+```bash
+python3 iterate_functions.py path/to/file.doc.md            # первая функция
+python3 iterate_functions.py --after-line 42 path/to/file.doc.md  # следующая после 42-й строки
+```
+
+Итератор также включает блоки верхнего уровня: "Назначение файла" и "Внутренняя структура".
+
+Можно сохранять курсор между запусками:
+
+```bash
+python3 iterate_functions.py --state-file .iter_state.json path/to/file.doc.md
+# следующий вызов возьмёт курсор из файла состояния
+python3 iterate_functions.py --state-file .iter_state.json path/to/file.doc.md
+```
+
+Для автоматизации есть JSON-вывод:
+
+```bash
+python3 iterate_functions.py --json --state-file .iter_state.json path/to/file.doc.md
+```
+
+Использовать как функцию (например, в своём пайплайне LLM):
+
+```python
+from pathlib import Path
+from iterate_functions import next_function_segment, IteratorState
+
+state = IteratorState()
+while True:
+    block, state = next_function_segment(Path("path/to/file.doc.md"), state)
+    if not block:
+        break
+    # передайте блок.start_line и блок.length в LLM, затем снова вызовите next_function_segment
+```
+
 ## Проверка заполненного шаблона
 
 Когда документация готова, убедитесь, что подрядчик заполнил все поля и не изменил структуру:
