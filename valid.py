@@ -20,7 +20,12 @@ except ModuleNotFoundError:
 # Regular expression for finding placeholders
 PLACEHOLDER_PATTERN = re.compile(r"<[^>]+>")
 FUNCTION_HEADER_PATTERN = re.compile(r"^### `func\s+(.+?)`$")
-FIELD_PATTERN = re.compile(r"^- (.+?):\s*(.+)$")
+FIELD_PATTERN = re.compile(r"^- (.+?):\s*(.*)$")
+
+NO_VALUE_MARKERS = {"нет", "<нет>"}
+RELATION_FIELD_NAME = "Взаимосвязь с другими функциями файла"
+RELATION_OTHER_FIELD_NAME = "Взаимосвязь с другими функциями из других файлов"
+RELATION_FIELD_NAMES = {RELATION_FIELD_NAME, RELATION_OTHER_FIELD_NAME}
 
 
 def generate_reference_template(go_file: Path) -> List[str]:
@@ -53,16 +58,46 @@ def is_placeholder(text: str) -> bool:
     return bool(PLACEHOLDER_PATTERN.search(text))
 
 
+def normalize_marker_value(text: str) -> str:
+    """Normalize text for comparison with no-value markers."""
+    return text.strip().strip("`").lower()
+
+
+def is_no_value(text: str) -> bool:
+    """Check if text represents an explicit 'no value' marker."""
+    return normalize_marker_value(text) in NO_VALUE_MARKERS
+
+
+def is_empty_relation_value(text: str) -> bool:
+    """Relations field may be empty, marked with dash, or an explicit no-value marker."""
+    normalized = normalize_marker_value(text)
+    return not normalized or normalized == "—" or normalized in NO_VALUE_MARKERS
+
+
+def _normalize_relation_lines(value: str) -> List[str]:
+    """Normalize relation field content for comparison."""
+    if is_empty_relation_value(value):
+        return []
+    return [line.strip() for line in value.splitlines() if line.strip()]
+
+
+def find_extra_relation_lines(template_value: str, doc_value: str) -> List[str]:
+    """Return lines that are present in the document but absent in the template relations block."""
+    template_lines = _normalize_relation_lines(template_value)
+    doc_lines = _normalize_relation_lines(doc_value)
+    return [line for line in doc_lines if line not in template_lines]
+
+
 def is_valid_description(text: str) -> bool:
     """Check that description is valid (not empty and not a placeholder)."""
     text = text.strip()
     if not text:
         return False
     # Allow special values
-    if text in ("—", "<нет>"):
+    if text == "—" or is_no_value(text):
         return True
     # Check that it's not a placeholder (except <нет>)
-    if is_placeholder(text) and text.lower() != "<нет>":
+    if is_placeholder(text) and not is_no_value(text):
         return False
     return True
 
@@ -100,22 +135,27 @@ def parse_document(lines: List[str]) -> Tuple[Dict[str, Dict[str, str]], Dict[st
             if match:
                 field_name = match.group(1).strip()
                 field_value = match.group(2).strip()
+                line_has_trailing_colon = line.endswith(":")
                 
                 # Store line number for this field
                 line_numbers[current_function][field_name] = line_num
                 
                 # Handle multiline fields
-                if field_value.endswith(":") and not field_value.endswith("—"):
+                if line_has_trailing_colon and not field_value.endswith("—"):
                     # Multiline field (e.g., "Взаимосвязь с другими функциями файла:")
                     i += 1
                     multiline_value = []
                     while i < len(lines):
-                        next_line = lines[i].strip()
-                        if next_line and not next_line.startswith("- "):
-                            multiline_value.append(next_line)
-                            i += 1
-                        else:
+                        raw_next_line = lines[i]
+                        stripped_next_line = raw_next_line.strip()
+                        if not stripped_next_line:
                             break
+                        # Allow nested bullet points that are indented to belong to the current field
+                        if raw_next_line.startswith("  ") or not stripped_next_line.startswith("- "):
+                            multiline_value.append(stripped_next_line)
+                            i += 1
+                            continue
+                        break
                     field_value = "\n".join(multiline_value) if multiline_value else "—"
                     current_fields[field_name] = field_value
                 else:
@@ -200,25 +240,40 @@ def validate_functions(
             template_value = template_functions[func_name][field_name]
             doc_value = doc_functions[func_name][field_name]
             field_line = doc_line_numbers.get(func_name, {}).get(field_name, 0)
+
+            # Detect extra lines in the relations-within-file block
+            if field_name in RELATION_FIELD_NAMES:
+                extra_lines = find_extra_relation_lines(template_value, doc_value)
+                if extra_lines:
+                    if field_line:
+                        issues.append(
+                            f"Line {field_line}: function '{func_name}', field '{field_name}': "
+                            f"contains extra lines not in template: {', '.join(extra_lines)}"
+                        )
+                    else:
+                        issues.append(
+                            f"Function '{func_name}', field '{field_name}': "
+                            f"contains extra lines not in template: {', '.join(extra_lines)}"
+                        )
             
             # If template had a placeholder, check that it's replaced
             if is_placeholder(template_value):
                 # Remove backticks for comparison
-                template_clean = template_value.strip().strip('`').lower()
-                doc_clean = doc_value.strip().strip('`').lower()
+                template_clean = normalize_marker_value(template_value)
+                doc_clean = normalize_marker_value(doc_value)
                 
                 # If template had <нет>, document should also have <нет>
-                if template_clean == "<нет>":
-                    if doc_clean != "<нет>":
+                if template_clean in NO_VALUE_MARKERS:
+                    if not is_no_value(doc_value):
                         if field_line:
                             issues.append(
                                 f"Line {field_line}: function '{func_name}', field '{field_name}': "
-                                f"expected '<нет>', but found '{doc_value}'"
+                                f"expected 'нет', but found '{doc_value}'"
                             )
                         else:
                             issues.append(
                                 f"Function '{func_name}', field '{field_name}': "
-                                f"expected '<нет>', but found '{doc_value}'"
+                                f"expected 'нет', but found '{doc_value}'"
                             )
                     continue
                 
@@ -234,19 +289,17 @@ def validate_functions(
                             f"Function '{func_name}', field '{field_name}': "
                             f"placeholder not replaced with description"
                         )
-                elif is_placeholder(doc_value):
-                    doc_placeholder_clean = doc_clean
-                    if doc_placeholder_clean != "<нет>":
-                        if field_line:
-                            issues.append(
-                                f"Line {field_line}: function '{func_name}', field '{field_name}': "
-                                f"still contains placeholder"
-                            )
-                        else:
-                            issues.append(
-                                f"Function '{func_name}', field '{field_name}': "
-                                f"still contains placeholder"
-                            )
+                elif is_placeholder(doc_value) and not is_no_value(doc_value):
+                    if field_line:
+                        issues.append(
+                            f"Line {field_line}: function '{func_name}', field '{field_name}': "
+                            f"still contains placeholder"
+                        )
+                    else:
+                        issues.append(
+                            f"Function '{func_name}', field '{field_name}': "
+                            f"still contains placeholder"
+                        )
     
     return issues
 
@@ -332,4 +385,3 @@ def main(argv: List[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

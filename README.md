@@ -34,6 +34,51 @@ python3 generate_template.py path/to/file.go --out docs/file-doc.md
 python3 generate_template.py --log-level DEBUG path/to/file.go
 ```
 
+### Генерация с итератором по блокам
+
+Если нужно проходить шаблон последовательно (например, отдавая куски LLM), используйте
+`generate_documentation_iter`, который пишет файл и по очереди отдаёт метаданные блока
+("Назначение файла", "Внутренняя структура" и каждую функцию):
+
+```python
+from pathlib import Path
+from go_template import generate_documentation_iter
+
+for block in generate_documentation_iter(Path("path/to/file.go")):
+    print(block.name, block.kind, block.start_line, block.length)
+    # block.lines — текст блока, block.path — путь до сгенерированного файла
+    # можно передать block.start_line/block.length в LLM и затем идти к следующему блоку
+```
+
+Чтобы писать разные блоки в разные файлы, передайте резолвер пути:
+
+```python
+from pathlib import Path
+from go_template import generate_documentation_iter
+
+def resolver(name: str, kind: str, index: int) -> Path:
+    if kind == "func":
+        return Path("docs/funcs") / f"{index:03d}-{name}.doc.md"
+    return Path("docs/sections") / f"{index:03d}-{name}.doc.md"
+
+for block in generate_documentation_iter(Path("path/to/file.go"), block_path_resolver=resolver):
+    print(block.path, block.start_line, block.length)
+```
+
+### Скрипт поэтапной генерации и склейки
+
+Утилита `staged_generate.py` автоматизирует процесс: каждый блок записывается в отдельный файл,
+после чего скрипт объединяет их в итоговый Markdown:
+
+```bash
+python3 staged_generate.py path/to/file.go \
+  --blocks-dir tmp/blocks \
+  --out docs/file.doc.md \
+  --log-level INFO
+```
+
+По умолчанию временные блоки удаляются после склейки; добавьте `--keep-blocks`, чтобы сохранить их.
+
 ### Обход плейсхолдеров в готовом шаблоне
 
 Когда шаблон уже создан, можно перечислить все `<<FILL ...>>` с номерами строк:

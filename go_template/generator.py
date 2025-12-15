@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Dict, List, Optional, Tuple
+import re
 
 from .parser import (
     extract_declarations,
@@ -13,7 +15,33 @@ from .parser import (
     strip_comments_preserve_whitespace,
 )
 from .repository import build_repository_index
-from .template_renderer import render_template
+from .template_renderer import render_template, render_template_blocks
+
+
+FUNC_HEADER_PATTERN = re.compile(r"^### `func\s+(.+?)`$")
+
+
+@dataclass
+class TemplateBlockMeta:
+    name: str
+    kind: str
+    start_line: int
+    end_line: int
+    length: int
+    lines: List[str]
+    path: str
+
+
+def _classify_block(block: List[str]) -> Tuple[str, str]:
+    if not block:
+        return "unknown", ""
+    first = block[0].strip()
+    if first.startswith("### `func"):
+        match = FUNC_HEADER_PATTERN.match(first)
+        return "func", match.group(1).strip() if match else first
+    if first.startswith("## "):
+        return "section", first[3:].strip()
+    return "section", first
 
 
 def _find_repository_root(start: Path) -> Path:
@@ -32,7 +60,7 @@ def _find_repository_root(start: Path) -> Path:
         return start
 
 
-def generate_documentation(go_file: Path, output_path: Optional[Path] = None) -> Path:
+def _prepare_render_inputs(go_file: Path) -> Tuple[Path, List[str], List[str], List[str], List[dict], List[str], List[str]]:
     if not go_file.is_file():
         raise FileNotFoundError(f"{go_file} is not a file")
 
@@ -108,6 +136,27 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
         "Internal imports detected: %s",
         ", ".join(internal_imports) if internal_imports else "none",
     )
+    return (
+        resolved_path,
+        types,
+        consts,
+        vars_,
+        funcs,
+        internal_imports,
+        other_callers,
+    )
+
+
+def generate_documentation(go_file: Path, output_path: Optional[Path] = None) -> Path:
+    (
+        resolved_path,
+        types,
+        consts,
+        vars_,
+        funcs,
+        internal_imports,
+        other_callers,
+    ) = _prepare_render_inputs(go_file)
 
     content = render_template(
         resolved_path,
@@ -124,3 +173,78 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
     output_path.write_text(content, encoding="utf-8")
     logging.info("Documentation written to %s", output_path)
     return output_path
+
+
+def generate_documentation_iter(
+    go_file: Path,
+    output_path: Optional[Path] = None,
+    block_path_resolver: Optional[Callable[[str, str, int], Path]] = None,
+):
+    """Yield template blocks as they are written to disk.
+
+    Итератор возвращает метаданные по блокам (включая разделы "Назначение файла",
+    "Внутренняя структура" и каждую функцию) с номерами строк в итоговом файле.
+    Можно задать block_path_resolver(name, kind, index) → Path, чтобы выводить
+    разные блоки в разные файлы (нумерация строк будет в пределах целевого файла).
+    """
+    (
+        resolved_path,
+        types,
+        consts,
+        vars_,
+        funcs,
+        internal_imports,
+        other_callers,
+    ) = _prepare_render_inputs(go_file)
+
+    blocks = render_template_blocks(
+        resolved_path,
+        types,
+        consts,
+        vars_,
+        funcs,
+        internal_imports,
+        other_callers,
+    )
+    if output_path is None:
+        output_path = go_file.with_name(f"{go_file.stem}.doc.md")
+
+    # Если блоки идут в разные файлы, считаем номера строк отдельно для каждого пути.
+    line_counters: Dict[Path, int] = {}
+    initialized_paths: set[Path] = set()
+
+    for idx, block in enumerate(blocks):
+        kind, name = _classify_block(block)
+        target_path = (
+            block_path_resolver(name, kind, idx)
+            if block_path_resolver is not None
+            else output_path
+        )
+        if target_path is None:
+            target_path = output_path
+        target_path = Path(target_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        start_line = line_counters.get(target_path, 1)
+        length = len(block)
+        end_line = start_line + length - 1 if length else start_line - 1
+
+        mode = "a" if target_path in initialized_paths else "w"
+        with target_path.open(mode, encoding="utf-8") as fh:
+            for line in block:
+                fh.write(line + "\n")
+
+        meta = TemplateBlockMeta(
+            name=name,
+            kind=kind,
+            start_line=start_line,
+            end_line=end_line,
+            length=length,
+            lines=list(block),
+            path=str(target_path),
+        )
+        yield meta
+
+        line_counters[target_path] = end_line + 1
+        initialized_paths.add(target_path)
+    logging.info("Documentation written to %s", output_path)
