@@ -171,10 +171,15 @@ def render_template_blocks(
                     f"- Считываемые переменные: {_placeholder()}",
                     f"- Записываемые переменные: {_placeholder()}",
                     f"- Внутренняя логика: {_placeholder()}",
-                    "- Взаимосвязь с другими функциями файла:"
-                    if same_rel != "—"
-                    else "- Взаимосвязь с другими функциями файла: —",
+                    f"- Связь с бизнес-процессом: {_placeholder()}",
+                    f"- Предусловия: {_placeholder()}",
+                    f"- Постусловия: {_placeholder()}",
                 ]
+            )
+            block_lines.append(
+                "- Взаимосвязь с другими функциями файла:"
+                if same_rel != "—"
+                else "- Взаимосвязь с другими функциями файла: —"
             )
             if same_rel != "—":
                 for sub_line in same_rel.splitlines():
@@ -189,9 +194,6 @@ def render_template_blocks(
                     block_lines.append(f"  {sub_line}")
             block_lines.extend(
                 [
-                    f"- Связь с бизнес-процессом: {_placeholder()}",
-                    f"- Предусловия: {_placeholder()}",
-                    f"- Постусловия: {_placeholder()}",
                     "",
                 ]
             )

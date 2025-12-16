@@ -197,7 +197,8 @@ def validate_functions(
     template_functions: Dict[str, Dict[str, str]],
     doc_functions: Dict[str, Dict[str, str]],
     doc_line_numbers: Dict[str, Dict[str, int]],
-    doc_function_line_numbers: Dict[str, int]
+    doc_function_line_numbers: Dict[str, int],
+    allow_partial: bool = False,
 ) -> List[str]:
     """Check that all functions are present and have all fields."""
     issues: List[str] = []
@@ -206,9 +207,10 @@ def validate_functions(
     template_func_names = set(template_functions.keys())
     doc_func_names = set(doc_functions.keys())
     
-    missing_functions = template_func_names - doc_func_names
-    for func_name in missing_functions:
-        issues.append(f"Function '{func_name}' is missing from the filled document")
+    if not allow_partial:
+        missing_functions = template_func_names - doc_func_names
+        for func_name in missing_functions:
+            issues.append(f"Function '{func_name}' is missing from the filled document")
     
     extra_functions = doc_func_names - template_func_names
     for func_name in extra_functions:
@@ -304,8 +306,8 @@ def validate_functions(
     return issues
 
 
-def validate_document(go_file: Path, doc_file: Path) -> List[str]:
-    """Validate filled template and return list of discovered issues."""
+def validate_document(go_file: Path, doc_file: Path, allow_partial: bool = False) -> List[str]:
+    """Validate filled template (or its fragment) and return discovered issues."""
     issues: List[str] = []
     
     # Generate reference template
@@ -330,12 +332,15 @@ def validate_document(go_file: Path, doc_file: Path) -> List[str]:
     doc_functions, doc_line_numbers, doc_function_line_numbers = parse_document(doc_lines)
     
     # 3. Check functions and their fields
-    issues.extend(validate_functions(
-        template_functions, 
-        doc_functions,
-        doc_line_numbers,
-        doc_function_line_numbers
-    ))
+    issues.extend(
+        validate_functions(
+            template_functions,
+            doc_functions,
+            doc_line_numbers,
+            doc_function_line_numbers,
+            allow_partial=allow_partial,
+        )
+    )
     
     return issues
 
@@ -360,6 +365,11 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
         help="Logging verbosity (default: WARNING)",
     )
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Allow validating a partial document (missing functions/sections are ignored).",
+    )
     return parser.parse_args(argv)
 
 
@@ -371,7 +381,7 @@ def main(argv: List[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
     
-    issues = validate_document(args.go_file, args.doc_file)
+    issues = validate_document(args.go_file, args.doc_file, allow_partial=args.allow_partial)
     
     if issues:
         print("Template validation failed:", file=sys.stderr)
