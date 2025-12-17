@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 import re
 
 from .parser import (
@@ -14,11 +14,14 @@ from .parser import (
     parse_imports,
     strip_comments_preserve_whitespace,
 )
-from .repository import build_repository_index
+from .repository import GO_BUILTINS, GO_KEYWORDS, build_repository_index
 from .template_renderer import render_template, render_template_blocks
 
 
 FUNC_HEADER_PATTERN = re.compile(r"^### `func\s+(.+?)`$")
+IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+ASSIGN_OP_PATTERN = re.compile(r":=|<<=|>>=|&\^=|\+=|-=|\*=|/=|%=|&=|\|=|\^=|=")
+INC_DEC_PATTERN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(\+\+|--)")
 
 
 @dataclass
@@ -42,6 +45,200 @@ def _classify_block(block: List[str]) -> Tuple[str, str]:
     if first.startswith("## "):
         return "section", first[3:].strip()
     return "section", first
+
+
+def _split_top_level_params(signature: str) -> List[str]:
+    parts: List[str] = []
+    buf: List[str] = []
+    depth_paren = depth_brack = depth_brace = 0
+    for ch in signature:
+        if ch == "(":
+            depth_paren += 1
+        elif ch == ")":
+            depth_paren = max(depth_paren - 1, 0)
+        elif ch == "[":
+            depth_brack += 1
+        elif ch == "]":
+            depth_brack = max(depth_brack - 1, 0)
+        elif ch == "{":
+            depth_brace += 1
+        elif ch == "}":
+            depth_brace = max(depth_brace - 1, 0)
+        if ch == "," and depth_paren == depth_brack == depth_brace == 0:
+            part = "".join(buf).strip()
+            if part:
+                parts.append(part)
+            buf = []
+            continue
+        buf.append(ch)
+    if buf:
+        part = "".join(buf).strip()
+        if part:
+            parts.append(part)
+    return parts
+
+
+def _is_identifier(token: str) -> bool:
+    return bool(IDENTIFIER_PATTERN.fullmatch(token)) and token not in GO_KEYWORDS
+
+
+def _split_first_token(fragment: str) -> Tuple[str, str]:
+    fragment = fragment.strip()
+    if not fragment:
+        return "", ""
+    parts = fragment.split(None, 1)
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], parts[1]
+
+
+def _extract_param_names(signature: str) -> List[str]:
+    if not signature:
+        return []
+    pending: List[str] = []
+    names: List[str] = []
+    for part in _split_top_level_params(signature):
+        first, rest = _split_first_token(part)
+        if not first:
+            continue
+        if rest:
+            if pending:
+                names.extend([name for name in pending if _is_identifier(name)])
+                pending.clear()
+            if _is_identifier(first):
+                names.append(first)
+        else:
+            if _is_identifier(first):
+                pending.append(first)
+    return names
+
+
+def _extract_receiver_name(receiver: str) -> Optional[str]:
+    if not receiver:
+        return None
+    receiver = receiver.strip()
+    if receiver.startswith("(") and receiver.endswith(")"):
+        receiver = receiver[1:-1].strip()
+    if not receiver:
+        return None
+    parts = receiver.split()
+    if len(parts) >= 2 and _is_identifier(parts[0]):
+        return parts[0]
+    return None
+
+
+def _mask_string_literals(source: str) -> str:
+    chars = list(source)
+    i = 0
+    length = len(source)
+    while i < length:
+        ch = source[i]
+        if ch == '"':
+            i = _mask_quoted_string(chars, source, i, '"')
+        elif ch == "'":
+            i = _mask_quoted_string(chars, source, i, "'")
+        elif ch == "`":
+            i = _mask_raw_string_literal(chars, source, i)
+        else:
+            i += 1
+    return "".join(chars)
+
+
+def _mask_quoted_string(chars: List[str], source: str, start: int, quote: str) -> int:
+    i = start + 1
+    length = len(source)
+    while i < length:
+        ch = source[i]
+        chars[i] = " "
+        if ch == "\\":
+            if i + 1 < length:
+                chars[i + 1] = " "
+            i += 2
+            continue
+        if ch == quote:
+            return i + 1
+        i += 1
+    return length
+
+
+def _mask_raw_string_literal(chars: List[str], source: str, start: int) -> int:
+    i = start + 1
+    length = len(source)
+    while i < length:
+        ch = source[i]
+        if ch == "`":
+            return i + 1
+        chars[i] = " " if ch != "\n" else "\n"
+        i += 1
+    return length
+
+
+def _extract_identifiers(expr: str) -> Iterable[str]:
+    for match in IDENTIFIER_PATTERN.finditer(expr):
+        name = match.group()
+        if name in GO_KEYWORDS or name in GO_BUILTINS:
+            continue
+        if match.start() > 0 and expr[match.start() - 1] == ".":
+            continue
+        yield name
+
+
+def _infer_read_write_vars(
+    func: dict,
+    global_vars: List[str],
+    global_consts: List[str],
+) -> Tuple[List[str], List[str]]:
+    body = func.get("body") or ""
+    if not body:
+        return [], []
+    sanitized = strip_comments_preserve_whitespace(body)
+    sanitized = _mask_string_literals(sanitized)
+
+    tracked = set(global_vars) | set(global_consts)
+    receiver_name = _extract_receiver_name(func.get("receiver", ""))
+    if receiver_name:
+        tracked.add(receiver_name)
+    tracked.update(_extract_param_names(func.get("params", "")))
+    tracked.update(_extract_param_names(func.get("returns", "")))
+
+    reads: set[str] = set()
+    writes: set[str] = set()
+
+    for match in ASSIGN_OP_PATTERN.finditer(sanitized):
+        op = match.group()
+        if op == "=":
+            prev_char = sanitized[match.start() - 1] if match.start() > 0 else ""
+            next_char = sanitized[match.end()] if match.end() < len(sanitized) else ""
+            if prev_char in ("=", "!", ">", "<") or next_char == "=":
+                continue
+        lhs_start = max(sanitized.rfind("\n", 0, match.start()), sanitized.rfind(";", 0, match.start()))
+        lhs_start = lhs_start + 1 if lhs_start != -1 else 0
+        lhs = sanitized[lhs_start:match.start()]
+        rhs_end = sanitized.find("\n", match.end())
+        semi_end = sanitized.find(";", match.end())
+        if rhs_end == -1 or (semi_end != -1 and semi_end < rhs_end):
+            rhs_end = semi_end
+        if rhs_end == -1:
+            rhs_end = len(sanitized)
+        rhs = sanitized[match.end():rhs_end]
+
+        lhs_names = [name for name in _extract_identifiers(lhs) if name != "_"]
+        for name in lhs_names:
+            tracked.add(name)
+            writes.add(name)
+            if op not in ("=", ":="):
+                reads.add(name)
+        for name in _extract_identifiers(rhs):
+            if name in tracked:
+                reads.add(name)
+
+    for match in INC_DEC_PATTERN.finditer(sanitized):
+        name = match.group(1)
+        if name in tracked:
+            reads.add(name)
+            writes.add(name)
+
+    return sorted(reads), sorted(writes)
 
 
 def _find_repository_root(start: Path) -> Path:
@@ -125,6 +322,9 @@ def _prepare_render_inputs(go_file: Path) -> Tuple[Path, List[str], List[str], L
         func.setdefault("full_name", func.get("full_name") or func.get("name", ""))
         func.setdefault("other_file_calls_list", [])
         func.setdefault("other_file_callers_list", [])
+        read_vars, write_vars = _infer_read_write_vars(func, vars_, consts)
+        func["read_vars"] = read_vars
+        func["write_vars"] = write_vars
 
     other_callers: List[str] = sorted(
         {label for func in funcs for label in func.get("other_file_callers_list", [])},

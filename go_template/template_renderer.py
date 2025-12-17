@@ -166,14 +166,24 @@ def render_template_blocks(
                     block_lines.append(f"  - `{entry}` — {_placeholder()}")
             else:
                 block_lines.append(f"- Выходные данные: `{return_display}` — {_placeholder()}")
+            read_vars = func.get("read_vars") or []
+            write_vars = func.get("write_vars") or []
+            if read_vars:
+                block_lines.append("- Считываемые переменные:")
+                for name in read_vars:
+                    block_lines.append(f"  - `{name}` — {_placeholder()}")
+            else:
+                block_lines.append(f"- Считываемые переменные: {_placeholder()}")
+            if write_vars:
+                block_lines.append("- Записываемые переменные:")
+                for name in write_vars:
+                    block_lines.append(f"  - `{name}` — {_placeholder()}")
+            else:
+                block_lines.append(f"- Записываемые переменные: {_placeholder()}")
             block_lines.extend(
                 [
-                    f"- Считываемые переменные: {_placeholder()}",
-                    f"- Записываемые переменные: {_placeholder()}",
                     f"- Внутренняя логика: {_placeholder()}",
                     f"- Связь с бизнес-процессом: {_placeholder()}",
-                    f"- Предусловия: {_placeholder()}",
-                    f"- Постусловия: {_placeholder()}",
                 ]
             )
             block_lines.append(
