@@ -150,58 +150,62 @@ def render_template_blocks(
 
             block_lines: List[str] = [
                 f"### `func {receiver_display}{func.get('full_name', func.get('name', ''))}`",
-                f"- Назначение: {_placeholder()}",
+                "- Назначение:",
+                f"  {_placeholder()}",
+                "",
             ]
             param_entries = _normalize_param_entries(param_display)
+            block_lines.append("- Входные данные:")
             if param_entries:
-                block_lines.append("- Входные данные:")
                 for entry in param_entries:
                     block_lines.append(f"  - `{entry}` — {_placeholder()}")
             else:
-                block_lines.append(f"- Входные данные: `{param_display}` — {_placeholder()}")
+                block_lines.append(f"  {_placeholder()}")
+            block_lines.append("")
             return_entries = _normalize_param_entries(return_display)
+            block_lines.append("- Выходные данные:")
             if return_entries:
-                block_lines.append("- Выходные данные:")
                 for entry in return_entries:
                     block_lines.append(f"  - `{entry}` — {_placeholder()}")
             else:
-                block_lines.append(f"- Выходные данные: `{return_display}` — {_placeholder()}")
+                block_lines.append(f"  {_placeholder()}")
+            block_lines.append("")
             read_vars = func.get("read_vars") or []
             write_vars = func.get("write_vars") or []
+            block_lines.append("- Считываемые переменные:")
             if read_vars:
-                block_lines.append("- Считываемые переменные:")
                 for name in read_vars:
                     block_lines.append(f"  - `{name}` — {_placeholder()}")
             else:
-                block_lines.append(f"- Считываемые переменные: {_placeholder()}")
+                block_lines.append(f"  {_placeholder()}")
+            block_lines.append("- Записываемые переменные:")
             if write_vars:
-                block_lines.append("- Записываемые переменные:")
                 for name in write_vars:
                     block_lines.append(f"  - `{name}` — {_placeholder()}")
             else:
-                block_lines.append(f"- Записываемые переменные: {_placeholder()}")
-            block_lines.extend(
-                [
-                    f"- Внутренняя логика: {_placeholder()}",
-                    f"- Связь с бизнес-процессом: {_placeholder()}",
-                ]
-            )
+                block_lines.append(f"  {_placeholder()}")
+            block_lines.append("")
+            block_lines.append("- Внутренняя логика:")
+            block_lines.append(f"  {_placeholder()}")
+            block_lines.append("- Связь с бизнес-процессом:")
+            block_lines.append(f"  {_placeholder()}")
+            block_lines.append("")
             block_lines.append(
                 "- Взаимосвязь с другими функциями файла:"
-                if same_rel != "—"
-                else "- Взаимосвязь с другими функциями файла: —"
             )
             if same_rel != "—":
                 for sub_line in same_rel.splitlines():
                     block_lines.append(f"  {sub_line}")
+            else:
+                block_lines.append("  —")
             block_lines.append(
                 "- Взаимосвязь с другими функциями из других файлов:"
-                if other_rel != "—"
-                else "- Взаимосвязь с другими функциями из других файлов: нет"
             )
             if other_rel != "—":
                 for sub_line in other_rel.splitlines():
                     block_lines.append(f"  {sub_line}")
+            else:
+                block_lines.append("  нет")
             block_lines.extend(
                 [
                     "",
