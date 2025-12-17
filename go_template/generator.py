@@ -22,6 +22,35 @@ FUNC_HEADER_PATTERN = re.compile(r"^### `func\s+(.+?)`$")
 IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 ASSIGN_OP_PATTERN = re.compile(r":=|<<=|>>=|&\^=|\+=|-=|\*=|/=|%=|&=|\|=|\^=|=")
 INC_DEC_PATTERN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(\+\+|--)")
+PREDECLARED_TYPES = {
+    "any",
+    "bool",
+    "byte",
+    "complex64",
+    "complex128",
+    "error",
+    "float32",
+    "float64",
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "rune",
+    "string",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "uintptr",
+}
+PREDECLARED_IDENTIFIERS = {
+    "false",
+    "iota",
+    "nil",
+    "true",
+}
 
 
 @dataclass
@@ -113,6 +142,20 @@ def _extract_param_names(signature: str) -> List[str]:
     return names
 
 
+def _extract_import_aliases(imports: List[dict]) -> List[str]:
+    aliases: List[str] = []
+    for entry in imports:
+        alias = entry.get("alias")
+        path = entry.get("path", "")
+        if alias in (".", "_"):
+            continue
+        if not alias:
+            alias = path.split("/")[-1]
+        if alias:
+            aliases.append(alias)
+    return aliases
+
+
 def _extract_receiver_name(receiver: str) -> Optional[str]:
     if not receiver:
         return None
@@ -187,6 +230,9 @@ def _infer_read_write_vars(
     func: dict,
     global_vars: List[str],
     global_consts: List[str],
+    type_names: List[str],
+    import_aliases: List[str],
+    function_names: List[str],
 ) -> Tuple[List[str], List[str]]:
     body = func.get("body") or ""
     if not body:
@@ -194,15 +240,17 @@ def _infer_read_write_vars(
     sanitized = strip_comments_preserve_whitespace(body)
     sanitized = _mask_string_literals(sanitized)
 
-    tracked = set(global_vars) | set(global_consts)
-    receiver_name = _extract_receiver_name(func.get("receiver", ""))
-    if receiver_name:
-        tracked.add(receiver_name)
-    tracked.update(_extract_param_names(func.get("params", "")))
-    tracked.update(_extract_param_names(func.get("returns", "")))
+    exclude_names = (
+        set(type_names)
+        | set(import_aliases)
+        | set(function_names)
+        | set(PREDECLARED_TYPES)
+        | set(PREDECLARED_IDENTIFIERS)
+    )
 
     reads: set[str] = set()
     writes: set[str] = set()
+    lhs_spans: List[Tuple[int, int]] = []
 
     for match in ASSIGN_OP_PATTERN.finditer(sanitized):
         op = match.group()
@@ -214,6 +262,7 @@ def _infer_read_write_vars(
         lhs_start = max(sanitized.rfind("\n", 0, match.start()), sanitized.rfind(";", 0, match.start()))
         lhs_start = lhs_start + 1 if lhs_start != -1 else 0
         lhs = sanitized[lhs_start:match.start()]
+        lhs_spans.append((lhs_start, match.start()))
         rhs_end = sanitized.find("\n", match.end())
         semi_end = sanitized.find(";", match.end())
         if rhs_end == -1 or (semi_end != -1 and semi_end < rhs_end):
@@ -222,23 +271,57 @@ def _infer_read_write_vars(
             rhs_end = len(sanitized)
         rhs = sanitized[match.end():rhs_end]
 
-        lhs_names = [name for name in _extract_identifiers(lhs) if name != "_"]
+        lhs_names = [
+            name
+            for name in _extract_identifiers(lhs)
+            if name != "_" and name not in exclude_names
+        ]
         for name in lhs_names:
-            tracked.add(name)
             writes.add(name)
             if op not in ("=", ":="):
                 reads.add(name)
         for name in _extract_identifiers(rhs):
-            if name in tracked:
-                reads.add(name)
+            if name in exclude_names:
+                continue
+            reads.add(name)
 
     for match in INC_DEC_PATTERN.finditer(sanitized):
         name = match.group(1)
-        if name in tracked:
-            reads.add(name)
-            writes.add(name)
+        if name in exclude_names:
+            continue
+        reads.add(name)
+        writes.add(name)
+        lhs_spans.append((match.start(1), match.end(1)))
+
+    # Capture reads from the rest of the body (conditions, returns, calls, etc.),
+    # ignoring identifiers that appear only on assignment LHS.
+    for match in IDENTIFIER_PATTERN.finditer(sanitized):
+        name = match.group()
+        if name in GO_KEYWORDS or name in GO_BUILTINS:
+            continue
+        if name in exclude_names:
+            continue
+        if match.start() > 0 and sanitized[match.start() - 1] == ".":
+            continue
+        if any(start <= match.start() < end for start, end in lhs_spans):
+            continue
+        if _is_field_key(sanitized, match.end()):
+            continue
+        reads.add(name)
 
     return sorted(reads), sorted(writes)
+
+
+def _is_field_key(source: str, end_idx: int) -> bool:
+    i = end_idx
+    length = len(source)
+    while i < length and source[i].isspace():
+        i += 1
+    if i < length and source[i] == ":":
+        if i + 1 < length and source[i + 1] == "=":
+            return False
+        return True
+    return False
 
 
 def _find_repository_root(start: Path) -> Path:
@@ -317,12 +400,22 @@ def _prepare_render_inputs(go_file: Path) -> Tuple[Path, List[str], List[str], L
             len(funcs),
             resolved_path,
         )
+    import_aliases = _extract_import_aliases(imports)
+    func_names = [func.get("name", "") for func in funcs if func.get("name")]
+
     for func in funcs:
         func.setdefault("receiver", func.get("receiver", ""))
         func.setdefault("full_name", func.get("full_name") or func.get("name", ""))
         func.setdefault("other_file_calls_list", [])
         func.setdefault("other_file_callers_list", [])
-        read_vars, write_vars = _infer_read_write_vars(func, vars_, consts)
+        read_vars, write_vars = _infer_read_write_vars(
+            func,
+            vars_,
+            consts,
+            types,
+            import_aliases,
+            func_names,
+        )
         func["read_vars"] = read_vars
         func["write_vars"] = write_vars
 
