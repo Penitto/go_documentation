@@ -11,6 +11,9 @@ def _placeholder() -> str:
     return f"<<FILL {str(uuid.uuid4())[:8]}>>"
 
 
+INDENT = "    "
+
+
 def _split_top_level_params(param_display: str) -> List[str]:
     parts: List[str] = []
     buf: List[str] = []
@@ -95,6 +98,51 @@ def _split_first_token(fragment: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def _slugify_anchor(text: str) -> str:
+    text = text.replace("`", "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    return text or "func"
+
+
+def _doc_path_from_label(file_label: str) -> str:
+    if file_label.endswith(".go"):
+        return file_label[:-3] + ".doc.md"
+    if file_label.endswith(".md"):
+        return file_label
+    return file_label + ".doc.md"
+
+
+def _relation_link(label: str) -> str:
+    match = re.match(r"^(?P<name>.+?)\s*\((?P<file>[^)]+)\)$", label)
+    if match:
+        name = match.group("name").strip()
+        file_label = match.group("file").strip()
+        target = f"{_doc_path_from_label(file_label)}#func-{_slugify_anchor(name)}"
+        return f"[{label}]({target})"
+    if ":" in label:
+        left, right = label.split(":", 1)
+        left = left.strip()
+        right = right.strip()
+        if left.endswith(".go") or "/" in left:
+            target = f"{_doc_path_from_label(left)}#func-{_slugify_anchor(right or label)}"
+            return f"[{label}]({target})"
+    target = f"#func-{_slugify_anchor(label)}"
+    return f"[{label}]({target})"
+
+
+def _link_relation_line(line: str) -> str:
+    stripped = line.strip()
+    if not stripped.startswith("- "):
+        return stripped
+    if stripped.endswith(":"):
+        return stripped
+    label = stripped[2:].strip()
+    if not label:
+        return stripped
+    return f"- {_relation_link(label)}"
+
+
 def render_template_blocks(
     file_path: Path,
     types: List[str],
@@ -151,61 +199,64 @@ def render_template_blocks(
             block_lines: List[str] = [
                 f"### `func {receiver_display}{func.get('full_name', func.get('name', ''))}`",
                 "- Назначение:",
-                f"  {_placeholder()}",
+                f"{INDENT}{_placeholder()}",
                 "",
             ]
             param_entries = _normalize_param_entries(param_display)
             block_lines.append("- Входные данные:")
             if param_entries:
                 for entry in param_entries:
-                    block_lines.append(f"  - `{entry}` — {_placeholder()}")
+                    block_lines.append(f"{INDENT}- `{entry}` — {_placeholder()}")
             else:
-                block_lines.append(f"  {_placeholder()}")
+                block_lines.append(f"{INDENT}{_placeholder()}")
             block_lines.append("")
             return_entries = _normalize_param_entries(return_display)
             block_lines.append("- Выходные данные:")
             if return_entries:
                 for entry in return_entries:
-                    block_lines.append(f"  - `{entry}` — {_placeholder()}")
+                    block_lines.append(f"{INDENT}- `{entry}` — {_placeholder()}")
             else:
-                block_lines.append(f"  {_placeholder()}")
+                block_lines.append(f"{INDENT}{_placeholder()}")
             block_lines.append("")
             read_vars = func.get("read_vars") or []
             write_vars = func.get("write_vars") or []
             block_lines.append("- Считываемые переменные:")
             if read_vars:
                 for name in read_vars:
-                    block_lines.append(f"  - `{name}` — {_placeholder()}")
+                    block_lines.append(f"{INDENT}- `{name}` — {_placeholder()}")
             else:
-                block_lines.append(f"  {_placeholder()}")
+                block_lines.append(f"{INDENT}{_placeholder()}")
             block_lines.append("- Записываемые переменные:")
             if write_vars:
                 for name in write_vars:
-                    block_lines.append(f"  - `{name}` — {_placeholder()}")
+                    block_lines.append(f"{INDENT}- `{name}` — {_placeholder()}")
             else:
-                block_lines.append(f"  {_placeholder()}")
+                block_lines.append(f"{INDENT}{_placeholder()}")
             block_lines.append("")
             block_lines.append("- Внутренняя логика:")
-            block_lines.append(f"  {_placeholder()}")
+            block_lines.append(f"{INDENT}{_placeholder()}")
+            block_lines.append("")
             block_lines.append("- Связь с бизнес-процессом:")
-            block_lines.append(f"  {_placeholder()}")
+            block_lines.append(f"{INDENT}{_placeholder()}")
             block_lines.append("")
             block_lines.append(
                 "- Взаимосвязь с другими функциями файла:"
             )
             if same_rel != "—":
                 for sub_line in same_rel.splitlines():
-                    block_lines.append(f"  {sub_line}")
+                    linked = _link_relation_line(sub_line)
+                    block_lines.append(f"{INDENT}{linked}")
             else:
-                block_lines.append("  —")
+                block_lines.append(f"{INDENT}нет")
             block_lines.append(
                 "- Взаимосвязь с другими функциями из других файлов:"
             )
             if other_rel != "—":
                 for sub_line in other_rel.splitlines():
-                    block_lines.append(f"  {sub_line}")
+                    linked = _link_relation_line(sub_line)
+                    block_lines.append(f"{INDENT}{linked}")
             else:
-                block_lines.append("  нет")
+                block_lines.append(f"{INDENT}нет")
             block_lines.extend(
                 [
                     "",
