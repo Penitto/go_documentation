@@ -8,6 +8,7 @@ import re
 
 from .parser import (
     extract_declarations,
+    extract_type_details,
     find_module_info,
     filter_internal_imports,
     parse_functions,
@@ -280,10 +281,6 @@ def _infer_read_write_vars(
             writes.add(name)
             if op not in ("=", ":="):
                 reads.add(name)
-        for name in _extract_identifiers(rhs):
-            if name in exclude_names:
-                continue
-            reads.add(name)
 
     for match in INC_DEC_PATTERN.finditer(sanitized):
         name = match.group(1)
@@ -307,6 +304,8 @@ def _infer_read_write_vars(
             continue
         if _is_field_key(sanitized, match.end()):
             continue
+        if _is_call_expression(sanitized, match.end()):
+            continue
         reads.add(name)
 
     return sorted(reads), sorted(writes)
@@ -322,6 +321,14 @@ def _is_field_key(source: str, end_idx: int) -> bool:
             return False
         return True
     return False
+
+
+def _is_call_expression(source: str, end_idx: int) -> bool:
+    i = end_idx
+    length = len(source)
+    while i < length and source[i].isspace():
+        i += 1
+    return i < length and source[i] == "("
 
 
 def _find_repository_root(start: Path) -> Path:
@@ -340,7 +347,9 @@ def _find_repository_root(start: Path) -> Path:
         return start
 
 
-def _prepare_render_inputs(go_file: Path) -> Tuple[Path, List[str], List[str], List[str], List[dict], List[str], List[str]]:
+def _prepare_render_inputs(
+    go_file: Path,
+) -> Tuple[Path, List[str], Dict[str, dict], List[str], List[str], List[dict], List[str], List[str]]:
     if not go_file.is_file():
         raise FileNotFoundError(f"{go_file} is not a file")
 
@@ -348,6 +357,7 @@ def _prepare_render_inputs(go_file: Path) -> Tuple[Path, List[str], List[str], L
     source = go_file.read_text(encoding="utf-8")
     stripped = strip_comments_preserve_whitespace(source)
     types, consts, vars_ = extract_declarations(stripped)
+    type_details = extract_type_details(stripped)
     logging.debug(
         "Extracted declarations: %d types, %d consts, %d vars",
         len(types),
@@ -432,6 +442,7 @@ def _prepare_render_inputs(go_file: Path) -> Tuple[Path, List[str], List[str], L
     return (
         resolved_path,
         types,
+        type_details,
         consts,
         vars_,
         funcs,
@@ -444,6 +455,7 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
     (
         resolved_path,
         types,
+        type_details,
         consts,
         vars_,
         funcs,
@@ -454,6 +466,7 @@ def generate_documentation(go_file: Path, output_path: Optional[Path] = None) ->
     content = render_template(
         resolved_path,
         types,
+        type_details,
         consts,
         vars_,
         funcs,
@@ -483,6 +496,7 @@ def generate_documentation_iter(
     (
         resolved_path,
         types,
+        type_details,
         consts,
         vars_,
         funcs,
@@ -493,6 +507,7 @@ def generate_documentation_iter(
     blocks = render_template_blocks(
         resolved_path,
         types,
+        type_details,
         consts,
         vars_,
         funcs,

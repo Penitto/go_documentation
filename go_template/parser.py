@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import logging
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 logger = logging.getLogger(__name__)
@@ -122,6 +122,173 @@ def extract_declarations(source: str) -> Tuple[List[str], List[str], List[str]]:
         i += 1
 
     return types, consts, vars_
+
+
+def extract_type_details(source: str) -> Dict[str, dict]:
+    details: Dict[str, dict] = {}
+    length = len(source)
+    i = 0
+    depth = 0
+    while i < length:
+        ch = source[i]
+        if ch == '"':
+            i = _skip_string(source, i, '"')
+            continue
+        if ch == "'":
+            i = _skip_string(source, i, "'")
+            continue
+        if ch == "`":
+            i = _skip_raw_string(source, i)
+            continue
+        if ch == "{":
+            depth += 1
+            i += 1
+            continue
+        if ch == "}":
+            depth = max(depth - 1, 0)
+            i += 1
+            continue
+
+        if depth == 0 and _token_at(source, i, "type"):
+            i = _parse_type_decl_details(source, i, details)
+            continue
+
+        i += 1
+    return details
+
+
+def _parse_type_decl_details(source: str, start_idx: int, details: Dict[str, dict]) -> int:
+    idx = start_idx + len("type")
+    idx = _skip_whitespace(source, idx)
+    length = len(source)
+    if idx < length and source[idx] == "(":
+        block, idx = extract_balanced(source, idx, "(", ")")
+        _parse_type_block(block[1:-1], details)
+        return _skip_statement_terminators(source, idx)
+    idx = _parse_type_spec(source, idx, details)
+    return _skip_statement_terminators(source, idx)
+
+
+def _parse_type_block(content: str, details: Dict[str, dict]) -> None:
+    i = 0
+    length = len(content)
+    while i < length:
+        if content[i] in " \t\r\n;":
+            i += 1
+            continue
+        name, next_i = _read_identifier(content, i)
+        if not name:
+            i += 1
+            continue
+        i = _parse_type_spec(content, i, details)
+        if i <= next_i:
+            i = next_i + 1
+
+
+def _parse_type_spec(source: str, idx: int, details: Dict[str, dict]) -> int:
+    name, idx = _read_identifier(source, idx)
+    if not name:
+        return idx
+    idx = _skip_whitespace(source, idx)
+    if idx < len(source) and source[idx] == "[":
+        _, idx = extract_balanced(source, idx, "[", "]")
+        idx = _skip_whitespace(source, idx)
+    if idx < len(source) and source[idx] == "=":
+        idx += 1
+        idx = _skip_whitespace(source, idx)
+        underlying, idx = _read_type_expression(source, idx)
+        if underlying:
+            details[name] = {"kind": "alias", "underlying": underlying}
+        return idx
+    if _token_at(source, idx, "struct"):
+        idx += len("struct")
+        idx = _skip_whitespace(source, idx)
+        if idx < len(source) and source[idx] == "{":
+            block, idx = extract_balanced(source, idx, "{", "}")
+            fields = _parse_struct_fields(block[1:-1])
+            details[name] = {"kind": "struct", "fields": fields}
+        return idx
+    if _token_at(source, idx, "interface"):
+        idx += len("interface")
+        idx = _skip_whitespace(source, idx)
+        if idx < len(source) and source[idx] == "{":
+            block, idx = extract_balanced(source, idx, "{", "}")
+            methods = _parse_interface_methods(block[1:-1])
+            details[name] = {"kind": "interface", "methods": methods}
+        return idx
+    underlying, idx = _read_type_expression(source, idx)
+    if underlying:
+        details[name] = {"kind": "type", "underlying": underlying}
+    return idx
+
+
+def _read_type_expression(source: str, idx: int) -> Tuple[str, int]:
+    length = len(source)
+    start = idx
+    depth_paren = depth_brack = depth_brace = 0
+    while idx < length:
+        ch = source[idx]
+        if ch == '"':
+            idx = _skip_string(source, idx, '"')
+            continue
+        if ch == "'":
+            idx = _skip_string(source, idx, "'")
+            continue
+        if ch == "`":
+            idx = _skip_raw_string(source, idx)
+            continue
+        if ch == "(":
+            depth_paren += 1
+        elif ch == ")":
+            depth_paren = max(depth_paren - 1, 0)
+        elif ch == "[":
+            depth_brack += 1
+        elif ch == "]":
+            depth_brack = max(depth_brack - 1, 0)
+        elif ch == "{":
+            depth_brace += 1
+        elif ch == "}":
+            depth_brace = max(depth_brace - 1, 0)
+        if depth_paren == depth_brack == depth_brace == 0 and ch in "\n;":
+            break
+        idx += 1
+    return source[start:idx].strip(), idx
+
+
+def _parse_struct_fields(body: str) -> List[str]:
+    fields: List[str] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("}"):
+            continue
+        if "`" in line:
+            line = line.split("`", 1)[0].rstrip()
+        line = line.rstrip(";")
+        if not line:
+            continue
+        match = re.match(
+            r"^(?P<names>[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s+(?P<type>.+)$",
+            line,
+        )
+        if match:
+            type_text = match.group("type").strip()
+            for name in match.group("names").split(","):
+                fields.append(f"{name.strip()} {type_text}")
+        else:
+            fields.append(line)
+    return fields
+
+
+def _parse_interface_methods(body: str) -> List[str]:
+    methods: List[str] = []
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("}"):
+            continue
+        line = line.rstrip(";")
+        if line:
+            methods.append(line)
+    return methods
 
 
 def _extract_identifier_list(fragment: str) -> List[str]:

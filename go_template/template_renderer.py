@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 import re
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 import uuid
 
 
@@ -132,20 +132,71 @@ def _relation_link(label: str) -> str:
 
 
 def _link_relation_line(line: str) -> str:
+    prefix = line[: len(line) - len(line.lstrip())]
     stripped = line.strip()
     if not stripped.startswith("- "):
-        return stripped
+        return line.rstrip()
     if stripped.endswith(":"):
-        return stripped
+        return f"{prefix}{stripped}"
     label = stripped[2:].strip()
     if not label:
-        return stripped
-    return f"- {_relation_link(label)}"
+        return f"{prefix}{stripped}"
+    return f"{prefix}- {_relation_link(label)}"
+
+
+def _append_structure_group(lines: List[str], title: str, items: List[str]) -> None:
+    lines.append(f"- {title}:")
+    if items:
+        for name in items:
+            lines.append(f"{INDENT}- `{name}` — {_placeholder()}")
+    else:
+        lines.append(f"{INDENT}нет")
+    lines.append("")
+
+
+def _append_type_group(
+    lines: List[str],
+    title: str,
+    types: List[str],
+    type_details: Dict[str, dict],
+) -> None:
+    lines.append(f"- {title}:")
+    if not types:
+        lines.append(f"{INDENT}нет")
+        lines.append("")
+        return
+    for name in types:
+        lines.append(f"{INDENT}- `{name}` — {_placeholder()}")
+        detail = type_details.get(name, {})
+        kind = detail.get("kind")
+        if kind == "struct":
+            fields = detail.get("fields") or []
+            lines.append(f"{INDENT * 2}- Поля:")
+            if fields:
+                for field in fields:
+                    lines.append(f"{INDENT * 3}- `{field}` — {_placeholder()}")
+            else:
+                lines.append(f"{INDENT * 3}{_placeholder()}")
+        elif kind == "interface":
+            methods = detail.get("methods") or []
+            lines.append(f"{INDENT * 2}- Методы:")
+            if methods:
+                for method in methods:
+                    lines.append(f"{INDENT * 3}- `{method}` — {_placeholder()}")
+            else:
+                lines.append(f"{INDENT * 3}{_placeholder()}")
+        elif kind and detail.get("underlying"):
+            lines.append(f"{INDENT * 2}- Базовый тип: `{detail['underlying']}`")
+        else:
+            lines.append(f"{INDENT * 2}- Внутренняя структура типа:")
+            lines.append(f"{INDENT * 3}{_placeholder()}")
+    lines.append("")
 
 
 def render_template_blocks(
     file_path: Path,
     types: List[str],
+    type_details: Dict[str, dict],
     consts: List[str],
     vars_: List[str],
     funcs: List[dict],
@@ -162,25 +213,22 @@ def render_template_blocks(
     )
 
     structure_lines: List[str] = ["## Внутренняя структура"]
-    if types:
-        structure_lines.append("- Ключевые типы (структуры, интерфейсы, алиасы) и их задачи:")
-        for name in types:
-            structure_lines.append(f"  - `{name}` — {_placeholder()}")
-    else:
-        structure_lines.append("- Ключевые типы (структуры, интерфейсы, алиасы) и их задачи: нет")
-    if consts:
-        structure_lines.append("- Глобальные константы и их значение:")
-        for name in consts:
-            structure_lines.append(f"  - `{name}` — {_placeholder()}")
-    else:
-        structure_lines.append("- Глобальные константы и их значение: нет")
-    if vars_:
-        structure_lines.append("- Глобальные переменные и их значение:")
-        for name in vars_:
-            structure_lines.append(f"  - `{name}` — {_placeholder()}")
-    else:
-        structure_lines.append("- Глобальные переменные и их значение: нет")
-    structure_lines.append("")
+    _append_type_group(
+        structure_lines,
+        "Ключевые типы (структуры, интерфейсы, алиасы) и их задачи",
+        types,
+        type_details,
+    )
+    _append_structure_group(
+        structure_lines,
+        "Глобальные константы и их значение",
+        consts,
+    )
+    _append_structure_group(
+        structure_lines,
+        "Глобальные переменные и их значение",
+        vars_,
+    )
     blocks.append(structure_lines)
 
     funcs_header: List[str] = ["## Функции и методы"]
@@ -274,6 +322,7 @@ def render_template_blocks(
 def render_template(
     file_path: Path,
     types: List[str],
+    type_details: Dict[str, dict],
     consts: List[str],
     vars_: List[str],
     funcs: List[dict],
@@ -286,7 +335,16 @@ def render_template(
     except ValueError:
         rel_path = file_path.as_posix()
 
-    blocks = render_template_blocks(file_path, types, consts, vars_, funcs, internal_imports, file_callers)
+    blocks = render_template_blocks(
+        file_path,
+        types,
+        type_details,
+        consts,
+        vars_,
+        funcs,
+        internal_imports,
+        file_callers,
+    )
     lines: List[str] = [line for block in blocks for line in block]
 
     return "\n".join(lines).strip() + "\n"
