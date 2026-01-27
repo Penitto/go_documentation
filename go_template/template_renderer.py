@@ -247,7 +247,7 @@ def render_template_blocks(
             block_lines: List[str] = [
                 f"### `func {receiver_display}{func.get('full_name', func.get('name', ''))}`",
                 "- Назначение:",
-                f"{INDENT}{_placeholder()}",
+                f"{_placeholder()}",
                 "",
             ]
             param_entries = _normalize_param_entries(param_display)
@@ -282,10 +282,10 @@ def render_template_blocks(
                 block_lines.append(f"{INDENT}{_placeholder()}")
             block_lines.append("")
             block_lines.append("- Внутренняя логика:")
-            block_lines.append(f"{INDENT}{_placeholder()}")
+            block_lines.append(f"{_placeholder()}")
             block_lines.append("")
             block_lines.append("- Связь с бизнес-процессом:")
-            block_lines.append(f"{INDENT}{_placeholder()}")
+            block_lines.append(f"{_placeholder()}")
             block_lines.append("")
             block_lines.append(
                 "- Взаимосвязь с другими функциями файла:"

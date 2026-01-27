@@ -157,6 +157,25 @@ def _extract_import_aliases(imports: List[dict]) -> List[str]:
     return aliases
 
 
+def _extract_range_iterators(source: str, exclude_names: set[str]) -> set[str]:
+    iterators: set[str] = set()
+    for match in re.finditer(r"\bfor\s+([^\{]*?)\s+range\b", source, flags=re.DOTALL):
+        lhs = match.group(1).strip()
+        if not lhs:
+            continue
+        if ":=" in lhs:
+            lhs = lhs.rsplit(":=", 1)[0]
+        elif "=" in lhs:
+            lhs = lhs.rsplit("=", 1)[0]
+        for part in lhs.split(","):
+            name = part.strip()
+            if not name or name == "_":
+                continue
+            if _is_identifier(name) and name not in exclude_names:
+                iterators.add(name)
+    return iterators
+
+
 def _extract_receiver_name(receiver: str) -> Optional[str]:
     if not receiver:
         return None
@@ -252,6 +271,7 @@ def _infer_read_write_vars(
     reads: set[str] = set()
     writes: set[str] = set()
     lhs_spans: List[Tuple[int, int]] = []
+    range_iterators = _extract_range_iterators(sanitized, exclude_names)
 
     for match in ASSIGN_OP_PATTERN.finditer(sanitized):
         op = match.group()
@@ -308,6 +328,7 @@ def _infer_read_write_vars(
             continue
         reads.add(name)
 
+    writes.difference_update(range_iterators)
     return sorted(reads), sorted(writes)
 
 
