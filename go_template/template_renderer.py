@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import datetime
+import itertools
 import re
 from pathlib import Path
 from typing import Dict, List
 import uuid
 
 
+_PLACEHOLDER_COUNTER = itertools.count(1)
+
+
+def _reset_placeholder_counter() -> None:
+    global _PLACEHOLDER_COUNTER
+    _PLACEHOLDER_COUNTER = itertools.count(1)
+
+
 def _placeholder() -> str:
-    return f"<<FILL {str(uuid.uuid4())[:8]}>>"
+    return f"<<FILL {next(_PLACEHOLDER_COUNTER)}>>"
 
 
 INDENT = "    "
@@ -145,12 +154,12 @@ def _link_relation_line(line: str) -> str:
 
 
 def _append_structure_group(lines: List[str], title: str, items: List[str]) -> None:
-    lines.append(f"- {title}:")
+    lines.append(f"### {title}")
     if items:
         for name in items:
-            lines.append(f"{INDENT}- `{name}` — {_placeholder()}")
+            lines.append(f"- `{name}` — {_placeholder()}")
     else:
-        lines.append(f"{INDENT}нет")
+        lines.append("нет")
     lines.append("")
 
 
@@ -160,36 +169,36 @@ def _append_type_group(
     types: List[str],
     type_details: Dict[str, dict],
 ) -> None:
-    lines.append(f"- {title}:")
+    lines.append(f"### {title}")
     if not types:
-        lines.append(f"{INDENT}нет")
+        lines.append("нет")
         lines.append("")
         return
     for name in types:
-        lines.append(f"{INDENT}- `{name}` — {_placeholder()}")
+        lines.append(f"- `{name}` — {_placeholder()}")
         detail = type_details.get(name, {})
         kind = detail.get("kind")
         if kind == "struct":
             fields = detail.get("fields") or []
-            lines.append(f"{INDENT * 2}- Поля:")
+            lines.append(f"{INDENT}- Поля:")
             if fields:
                 for field in fields:
-                    lines.append(f"{INDENT * 3}- `{field}` — {_placeholder()}")
+                    lines.append(f"{INDENT * 2}- `{field}` — {_placeholder()}")
             else:
-                lines.append(f"{INDENT * 3}{_placeholder()}")
+                lines.append(f"{INDENT * 2}{_placeholder()}")
         elif kind == "interface":
             methods = detail.get("methods") or []
-            lines.append(f"{INDENT * 2}- Методы:")
+            lines.append(f"{INDENT}- Методы:")
             if methods:
                 for method in methods:
-                    lines.append(f"{INDENT * 3}- `{method}` — {_placeholder()}")
+                    lines.append(f"{INDENT * 2}- `{method}` — {_placeholder()}")
             else:
-                lines.append(f"{INDENT * 3}{_placeholder()}")
+                lines.append(f"{INDENT * 2}{_placeholder()}")
         elif kind and detail.get("underlying"):
-            lines.append(f"{INDENT * 2}- Базовый тип: `{detail['underlying']}`")
+            lines.append(f"{INDENT}- Базовый тип: `{detail['underlying']}`")
         else:
-            lines.append(f"{INDENT * 2}- Внутренняя структура типа:")
-            lines.append(f"{INDENT * 3}{_placeholder()}")
+            lines.append(f"{INDENT}- Внутренняя структура типа:")
+            lines.append(f"{INDENT * 2}{_placeholder()}")
     lines.append("")
 
 
@@ -203,16 +212,17 @@ def render_template_blocks(
     internal_imports: List[str],
     file_callers: List[str],
 ) -> List[List[str]]:
+    _reset_placeholder_counter()
     blocks: List[List[str]] = []
     blocks.append(
         [
-            "## Назначение файла",
+            "# Назначение файла",
             f"- Общая роль в проекте: {_placeholder()}",
             "",
         ]
     )
 
-    structure_lines: List[str] = ["## Внутренняя структура"]
+    structure_lines: List[str] = ["# Внутренняя структура"]
     _append_type_group(
         structure_lines,
         "Ключевые типы (структуры, интерфейсы, алиасы) и их задачи",
@@ -231,7 +241,7 @@ def render_template_blocks(
     )
     blocks.append(structure_lines)
 
-    funcs_header: List[str] = ["## Функции и методы"]
+    funcs_header: List[str] = ["# Функции и методы"]
     if funcs:
         funcs_header.append("")
         blocks.append(funcs_header)
@@ -245,66 +255,62 @@ def render_template_blocks(
             other_rel = func.get("relationship_other_files", "—")
 
             block_lines: List[str] = [
-                f"### `func {receiver_display}{func.get('full_name', func.get('name', ''))}`",
-                "- Назначение:",
+                f"## `func {receiver_display}{func.get('full_name', func.get('name', ''))}`",
+                "### Назначение",
                 f"{_placeholder()}",
                 "",
             ]
             param_entries = _normalize_param_entries(param_display)
-            block_lines.append("- Входные данные:")
+            block_lines.append("### Входные данные")
             if param_entries:
                 for entry in param_entries:
-                    block_lines.append(f"{INDENT}- `{entry}` — {_placeholder()}")
+                    block_lines.append(f"- `{entry}` — {_placeholder()}")
             else:
-                block_lines.append(f"{INDENT}{_placeholder()}")
+                block_lines.append(f"{_placeholder()}")
             block_lines.append("")
             return_entries = _normalize_param_entries(return_display)
-            block_lines.append("- Выходные данные:")
+            block_lines.append("### Выходные данные")
             if return_entries:
                 for entry in return_entries:
-                    block_lines.append(f"{INDENT}- `{entry}` — {_placeholder()}")
+                    block_lines.append(f"- `{entry}` — {_placeholder()}")
             else:
-                block_lines.append(f"{INDENT}{_placeholder()}")
+                block_lines.append(f"{_placeholder()}")
             block_lines.append("")
             read_vars = func.get("read_vars") or []
             write_vars = func.get("write_vars") or []
-            block_lines.append("- Считываемые переменные:")
+            block_lines.append("### Считываемые переменные")
             if read_vars:
                 for name in read_vars:
-                    block_lines.append(f"{INDENT}- `{name}` — {_placeholder()}")
+                    block_lines.append(f"- `{name}` — {_placeholder()}")
             else:
-                block_lines.append(f"{INDENT}{_placeholder()}")
-            block_lines.append("- Записываемые переменные:")
+                block_lines.append(f"{_placeholder()}")
+            block_lines.append("### Записываемые переменные")
             if write_vars:
                 for name in write_vars:
-                    block_lines.append(f"{INDENT}- `{name}` — {_placeholder()}")
+                    block_lines.append(f"- `{name}` — {_placeholder()}")
             else:
-                block_lines.append(f"{INDENT}{_placeholder()}")
+                block_lines.append(f"{_placeholder()}")
             block_lines.append("")
-            block_lines.append("- Внутренняя логика:")
+            block_lines.append("### Внутренняя логика")
             block_lines.append(f"{_placeholder()}")
             block_lines.append("")
-            block_lines.append("- Связь с бизнес-процессом:")
+            block_lines.append("### Связь с бизнес-процессом")
             block_lines.append(f"{_placeholder()}")
             block_lines.append("")
-            block_lines.append(
-                "- Взаимосвязь с другими функциями файла:"
-            )
+            block_lines.append("### Взаимосвязь с другими функциями файла")
             if same_rel != "—":
                 for sub_line in same_rel.splitlines():
                     linked = _link_relation_line(sub_line)
-                    block_lines.append(f"{INDENT}{linked}")
+                    block_lines.append(f"{linked}")
             else:
-                block_lines.append(f"{INDENT}нет")
-            block_lines.append(
-                "- Взаимосвязь с другими функциями из других файлов:"
-            )
+                block_lines.append("нет")
+            block_lines.append("### Взаимосвязь с другими функциями из других файлов")
             if other_rel != "—":
                 for sub_line in other_rel.splitlines():
                     linked = _link_relation_line(sub_line)
-                    block_lines.append(f"{INDENT}{linked}")
+                    block_lines.append(f"{linked}")
             else:
-                block_lines.append(f"{INDENT}нет")
+                block_lines.append("нет")
             block_lines.extend(
                 [
                     "",

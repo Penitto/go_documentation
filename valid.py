@@ -19,7 +19,9 @@ except ModuleNotFoundError:
 
 # Regular expression for finding placeholders
 PLACEHOLDER_PATTERN = re.compile(r"<[^>]+>")
-FUNCTION_HEADER_PATTERN = re.compile(r"^### `func\s+(.+?)`$")
+FUNCTION_HEADER_PATTERN = re.compile(r"^## `func\s+(.+?)`$")
+FUNCTION_HEADER_FALLBACK_PATTERN = re.compile(r"^### `func\s+(.+?)`$")
+FIELD_HEADING_PATTERN = re.compile(r"^### (.+)$")
 FIELD_PATTERN = re.compile(r"^- (.+?):\s*(.*)$")
 
 NO_VALUE_MARKERS = {"нет", "<нет>"}
@@ -48,6 +50,9 @@ def generate_reference_template(go_file: Path) -> List[str]:
 def extract_function_name(header: str) -> str:
     """Extract function name from header."""
     match = FUNCTION_HEADER_PATTERN.match(header)
+    if match:
+        return match.group(1).strip()
+    match = FUNCTION_HEADER_FALLBACK_PATTERN.match(header)
     if match:
         return match.group(1).strip()
     return ""
@@ -112,11 +117,12 @@ def parse_document(lines: List[str]) -> Tuple[Dict[str, Dict[str, str]], Dict[st
     i = 0
     
     while i < len(lines):
-        line = lines[i].strip()
+        raw_line = lines[i]
+        line = raw_line.strip()
         line_num = i + 1  # 1-based line numbers
         
         # Check function header
-        if line.startswith("### `func"):
+        if line.startswith("## `func") or line.startswith("### `func"):
             # Save previous function if exists
             if current_function is not None:
                 functions[current_function] = current_fields
@@ -131,6 +137,26 @@ def parse_document(lines: List[str]) -> Tuple[Dict[str, Dict[str, str]], Dict[st
         
         # Parse function fields
         if current_function is not None:
+            heading_match = FIELD_HEADING_PATTERN.match(line)
+            if heading_match:
+                field_name = heading_match.group(1).strip()
+                line_numbers[current_function][field_name] = line_num
+                i += 1
+                multiline_value = []
+                while i < len(lines):
+                    next_raw = lines[i]
+                    next_line = next_raw.strip()
+                    if not next_line:
+                        i += 1
+                        if multiline_value:
+                            break
+                        continue
+                    if next_line.startswith("## `func") or next_line.startswith("### "):
+                        break
+                    multiline_value.append(next_line)
+                    i += 1
+                current_fields[field_name] = "\n".join(multiline_value) if multiline_value else ""
+                continue
             match = FIELD_PATTERN.match(line)
             if match:
                 field_name = match.group(1).strip()
