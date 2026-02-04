@@ -21,6 +21,7 @@ from .template_renderer import render_template, render_template_blocks
 
 FUNC_HEADER_PATTERN = re.compile(r"^### `func\s+(.+?)`$")
 IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+SELECTOR_PATTERN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(\.\s*[A-Za-z_][A-Za-z0-9_]*)+")
 ASSIGN_OP_PATTERN = re.compile(r":=|<<=|>>=|&\^=|\+=|-=|\*=|/=|%=|&=|\|=|\^=|=")
 INC_DEC_PATTERN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(\+\+|--)")
 PREDECLARED_TYPES = {
@@ -246,6 +247,13 @@ def _extract_identifiers(expr: str) -> Iterable[str]:
         yield name
 
 
+def _extract_selector_names(expr: str) -> Iterable[str]:
+    for match in SELECTOR_PATTERN.finditer(expr):
+        raw = match.group(0)
+        normalized = re.sub(r"\s+", "", raw)
+        yield normalized
+
+
 def _infer_read_write_vars(
     func: dict,
     global_vars: List[str],
@@ -297,10 +305,28 @@ def _infer_read_write_vars(
             for name in _extract_identifiers(lhs)
             if name != "_" and name not in exclude_names
         ]
+        lhs_selectors = [
+            selector
+            for selector in _extract_selector_names(lhs)
+            if selector.split(".", 1)[0] not in exclude_names
+        ]
         for name in lhs_names:
             writes.add(name)
             if op not in ("=", ":="):
                 reads.add(name)
+        for selector in lhs_selectors:
+            writes.add(selector)
+            if op not in ("=", ":="):
+                reads.add(selector)
+        for name in _extract_identifiers(rhs):
+            if name in exclude_names:
+                continue
+            reads.add(name)
+        for selector in _extract_selector_names(rhs):
+            base = selector.split(".", 1)[0]
+            if base in exclude_names:
+                continue
+            reads.add(selector)
 
     for match in INC_DEC_PATTERN.finditer(sanitized):
         name = match.group(1)
@@ -327,6 +353,11 @@ def _infer_read_write_vars(
         if _is_call_expression(sanitized, match.end()):
             continue
         reads.add(name)
+    for selector in _extract_selector_names(sanitized):
+        base = selector.split(".", 1)[0]
+        if base in exclude_names:
+            continue
+        reads.add(selector)
 
     writes.difference_update(range_iterators)
     return sorted(reads), sorted(writes)
