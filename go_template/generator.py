@@ -360,7 +360,18 @@ def _infer_read_write_vars(
         reads.add(selector)
 
     writes.difference_update(range_iterators)
+    reads = _drop_base_when_selector_present(reads)
+    writes = _drop_base_when_selector_present(writes)
     return sorted(reads), sorted(writes)
+
+
+def _drop_base_when_selector_present(names: set[str]) -> set[str]:
+    selectors = [name for name in names if "." in name]
+    bases = {name.split(".", 1)[0] for name in selectors}
+    tails = {name.split(".")[-1] for name in selectors}
+    if not selectors:
+        return names
+    return {name for name in names if name not in bases and name not in tails}
 
 
 def _is_field_key(source: str, end_idx: int) -> bool:
