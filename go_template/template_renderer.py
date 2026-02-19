@@ -114,6 +114,56 @@ def _slugify_anchor(text: str) -> str:
     return text or "func"
 
 
+def _normalize_relation_target_name(name: str) -> str:
+    name = name.strip()
+    if "." not in name:
+        return name
+    left, right = name.split(".", 1)
+    if left and left[0].islower():
+        return right
+    return name
+
+
+def _receiver_display_for_anchor(receiver_type: str) -> str:
+    display = receiver_type.strip()
+    while display.startswith("*"):
+        display = display[1:]
+    if "[" in display:
+        display = display.split("[", 1)[0]
+    if "." in display:
+        display = display.split(".")[-1]
+    return display
+
+
+def _extract_receiver_type_from_receiver(receiver: str) -> str:
+    receiver = receiver.strip()
+    if not receiver:
+        return ""
+    if receiver.startswith("(") and receiver.endswith(")"):
+        receiver = receiver[1:-1].strip()
+    if not receiver:
+        return ""
+    parts = receiver.split()
+    if len(parts) >= 2:
+        return parts[-1]
+    return ""
+
+
+def _function_target_name(func: dict) -> str:
+    name = (func.get("name") or func.get("full_name") or "").strip()
+    receiver_type = (func.get("receiver_type") or "").strip()
+    if not receiver_type:
+        receiver_type = _extract_receiver_type_from_receiver(func.get("receiver", ""))
+    if receiver_type and name:
+        return f"{_receiver_display_for_anchor(receiver_type)}.{name}"
+    return name
+
+
+def _function_anchor_id(func: dict) -> str:
+    name = _function_target_name(func)
+    return f"markdown-header-func-{_slugify_anchor(name)}"
+
+
 def _doc_path_from_label(file_label: str) -> str:
     if file_label.endswith(".go"):
         return file_label[:-3] + ".doc.md"
@@ -125,18 +175,19 @@ def _doc_path_from_label(file_label: str) -> str:
 def _relation_link(label: str) -> str:
     match = re.match(r"^(?P<name>.+?)\s*\((?P<file>[^)]+)\)$", label)
     if match:
-        name = match.group("name").strip()
+        name = _normalize_relation_target_name(match.group("name").strip())
         file_label = match.group("file").strip()
-        target = f"{_doc_path_from_label(file_label)}#func-{_slugify_anchor(name)}"
+        target = f"{_doc_path_from_label(file_label)}#markdown-header-func-{_slugify_anchor(name)}"
         return f"[{label}]({target})"
     if ":" in label:
         left, right = label.split(":", 1)
         left = left.strip()
-        right = right.strip()
+        right = _normalize_relation_target_name(right.strip())
         if left.endswith(".go") or "/" in left:
-            target = f"{_doc_path_from_label(left)}#func-{_slugify_anchor(right or label)}"
+            target = f"{_doc_path_from_label(left)}#markdown-header-func-{_slugify_anchor(right or label)}"
             return f"[{label}]({target})"
-    target = f"#func-{_slugify_anchor(label)}"
+    target_name = _normalize_relation_target_name(label)
+    target = f"#markdown-header-func-{_slugify_anchor(target_name)}"
     return f"[{label}]({target})"
 
 
@@ -246,16 +297,18 @@ def render_template_blocks(
         funcs_header.append("")
         blocks.append(funcs_header)
         for func in funcs:
-            receiver_display = f"{func['receiver']} " if func.get("receiver") else ""
             params_raw = func.get("params")
             returns_raw = func.get("returns")
             param_display = params_raw if params_raw else "нет"
             return_display = returns_raw if returns_raw else "нет"
             same_rel = func.get("relationship_same_file", "—")
             other_rel = func.get("relationship_other_files", "—")
+            target_name = _function_target_name(func)
+            if not target_name:
+                target_name = func.get("full_name", func.get("name", ""))
 
             block_lines: List[str] = [
-                f"## `func {receiver_display}{func.get('full_name', func.get('name', ''))}`",
+                f"## `func {target_name}`",
                 "### Назначение",
                 f"{_placeholder()}",
                 "",
