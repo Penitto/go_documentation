@@ -9,7 +9,9 @@ from typing import Iterable, List, Tuple
 
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-OLD_ANCHOR_RE = re.compile(r"#func-([a-z0-9][a-z0-9-]*)")
+LABEL_WITH_FILE_RE = re.compile(r"^(?P<name>.+?)\s*\((?P<file>[^)]+)\)$")
+ANCHOR_STYLE_BITBUCKET = "bitbucket"
+ANCHOR_STYLE_COMMONMARK = "commonmark"
 
 
 def _collect_targets(target: Path) -> List[Path]:
@@ -22,16 +24,82 @@ def _collect_targets(target: Path) -> List[Path]:
     return [target]
 
 
-def _rewrite_links(content: str) -> Tuple[str, int]:
+def _slugify_bitbucket_anchor(text: str) -> str:
+    text = text.replace("`", "").strip().lower()
+    text = re.sub(r"\s+", "-", text)
+    text = re.sub(r"[^a-z0-9-]", "", text)
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    return text or "func"
+
+
+def _slugify_common_anchor(text: str) -> str:
+    text = text.replace("`", "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    return text or "func"
+
+
+def _anchor_fragment(name: str, style: str) -> str:
+    slug = (
+        _slugify_bitbucket_anchor(name)
+        if style == ANCHOR_STYLE_BITBUCKET
+        else _slugify_common_anchor(name)
+    )
+    if style == ANCHOR_STYLE_BITBUCKET:
+        return f"markdown-header-func-{slug}"
+    return f"func-{slug}"
+
+
+def _normalize_relation_target_name(name: str) -> str:
+    name = name.strip()
+    if "." not in name:
+        return name
+    left, right = name.split(".", 1)
+    if left and left[0].islower():
+        return right
+    return name
+
+
+def _extract_target_name_from_label(label: str) -> str:
+    label = label.strip()
+    match = LABEL_WITH_FILE_RE.match(label)
+    if match:
+        return _normalize_relation_target_name(match.group("name").strip())
+    if ":" in label:
+        left, right = label.split(":", 1)
+        left = left.strip()
+        if left.endswith(".go") or "/" in left:
+            return _normalize_relation_target_name(right.strip())
+    return _normalize_relation_target_name(label)
+
+
+def _rewrite_anchor_target(target: str, label: str, style: str) -> Tuple[str, int]:
+    hash_idx = target.rfind("#")
+    if hash_idx == -1:
+        return target, 0
+    fragment = target[hash_idx + 1 :]
+    if not (
+        fragment.startswith("func-")
+        or fragment.startswith("markdown-header-func-")
+    ):
+        return target, 0
+
+    prefix = target[:hash_idx]
+    target_name = _extract_target_name_from_label(label)
+    updated_fragment = _anchor_fragment(target_name, style)
+    updated_target = f"{prefix}#{updated_fragment}"
+    if updated_target == target:
+        return target, 0
+    return updated_target, 1
+
+
+def _rewrite_links(content: str, style: str) -> Tuple[str, int]:
     changed = 0
 
     def _replace_link(match: re.Match[str]) -> str:
         nonlocal changed
         label, target = match.group(1), match.group(2)
-        updated_target, count = OLD_ANCHOR_RE.subn(
-            r"#markdown-header-func-\1",
-            target,
-        )
+        updated_target, count = _rewrite_anchor_target(target, label, style)
         if count:
             changed += count
             return f"[{label}]({updated_target})"
@@ -40,9 +108,9 @@ def _rewrite_links(content: str) -> Tuple[str, int]:
     return LINK_RE.sub(_replace_link, content), changed
 
 
-def _migrate_file(path: Path, in_place: bool, out_path: Path | None) -> int:
+def _migrate_file(path: Path, in_place: bool, out_path: Path | None, style: str) -> int:
     original = path.read_text(encoding="utf-8")
-    updated, changed = _rewrite_links(original)
+    updated, changed = _rewrite_links(original, style)
     if in_place:
         path.write_text(updated, encoding="utf-8")
     elif out_path:
@@ -60,7 +128,11 @@ def _iter_targets(targets: Iterable[Path]) -> Iterable[Path]:
 
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Migrate old #func-* markdown anchors to #markdown-header-func-*.",
+        description=(
+            "Migrate function anchors in markdown links. "
+            "Use --anchor-style bitbucket for #markdown-header-func-* "
+            "or --anchor-style commonmark for #func-*."
+        ),
     )
     parser.add_argument("target", type=Path, help="Markdown file or directory")
     parser.add_argument("--in-place", action="store_true", help="Rewrite files in place")
@@ -69,6 +141,12 @@ def main(argv: List[str] | None = None) -> int:
         type=Path,
         default=None,
         help="Write migrated content to a new file (single-file target only)",
+    )
+    parser.add_argument(
+        "--anchor-style",
+        choices=[ANCHOR_STYLE_BITBUCKET, ANCHOR_STYLE_COMMONMARK],
+        default=ANCHOR_STYLE_BITBUCKET,
+        help="Target anchor style (default: bitbucket)",
     )
     args = parser.parse_args(argv)
 
@@ -91,7 +169,7 @@ def main(argv: List[str] | None = None) -> int:
 
     total_changed = 0
     for path in targets:
-        changed = _migrate_file(path, args.in_place, args.out)
+        changed = _migrate_file(path, args.in_place, args.out, args.anchor_style)
         total_changed += changed
         print(f"{path}: updated {changed} link(s)", file=sys.stderr)
 

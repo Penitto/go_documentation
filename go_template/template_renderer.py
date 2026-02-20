@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import itertools
+import os
 import re
 from pathlib import Path
 from typing import Dict, List
@@ -21,6 +22,16 @@ def _placeholder() -> str:
 
 
 INDENT = "    "
+ANCHOR_STYLE_ENV = "GO_DOC_ANCHOR_STYLE"
+ANCHOR_STYLE_BITBUCKET = "bitbucket"
+ANCHOR_STYLE_COMMONMARK = "commonmark"
+
+
+def _anchor_style() -> str:
+    raw = os.getenv(ANCHOR_STYLE_ENV, "").strip().lower()
+    if raw in {"commonmark", "standard", "vscode"}:
+        return ANCHOR_STYLE_COMMONMARK
+    return ANCHOR_STYLE_BITBUCKET
 
 
 def _split_top_level_params(param_display: str) -> List[str]:
@@ -109,9 +120,22 @@ def _split_first_token(fragment: str) -> tuple[str, str]:
 
 def _slugify_anchor(text: str) -> str:
     text = text.replace("`", "").strip().lower()
-    text = re.sub(r"[^a-z0-9]+", "-", text)
+    if _anchor_style() == ANCHOR_STYLE_BITBUCKET:
+        # Bitbucket-style anchors replace whitespace with hyphens,
+        # then drop punctuation (for example, Service.Run -> servicerun).
+        text = re.sub(r"\s+", "-", text)
+        text = re.sub(r"[^a-z0-9-]", "", text)
+    else:
+        text = re.sub(r"[^a-z0-9]+", "-", text)
     text = re.sub(r"-{2,}", "-", text).strip("-")
     return text or "func"
+
+
+def _anchor_fragment(name: str) -> str:
+    slug = _slugify_anchor(name)
+    if _anchor_style() == ANCHOR_STYLE_BITBUCKET:
+        return f"markdown-header-func-{slug}"
+    return f"func-{slug}"
 
 
 def _normalize_relation_target_name(name: str) -> str:
@@ -161,7 +185,7 @@ def _function_target_name(func: dict) -> str:
 
 def _function_anchor_id(func: dict) -> str:
     name = _function_target_name(func)
-    return f"markdown-header-func-{_slugify_anchor(name)}"
+    return _anchor_fragment(name)
 
 
 def _doc_path_from_label(file_label: str) -> str:
@@ -177,17 +201,17 @@ def _relation_link(label: str) -> str:
     if match:
         name = _normalize_relation_target_name(match.group("name").strip())
         file_label = match.group("file").strip()
-        target = f"{_doc_path_from_label(file_label)}#markdown-header-func-{_slugify_anchor(name)}"
+        target = f"{_doc_path_from_label(file_label)}#{_anchor_fragment(name)}"
         return f"[{label}]({target})"
     if ":" in label:
         left, right = label.split(":", 1)
         left = left.strip()
         right = _normalize_relation_target_name(right.strip())
         if left.endswith(".go") or "/" in left:
-            target = f"{_doc_path_from_label(left)}#markdown-header-func-{_slugify_anchor(right or label)}"
+            target = f"{_doc_path_from_label(left)}#{_anchor_fragment(right or label)}"
             return f"[{label}]({target})"
     target_name = _normalize_relation_target_name(label)
-    target = f"#markdown-header-func-{_slugify_anchor(target_name)}"
+    target = f"#{_anchor_fragment(target_name)}"
     return f"[{label}]({target})"
 
 

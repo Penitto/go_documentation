@@ -51,7 +51,7 @@ class TestTemplateRenderer(unittest.TestCase):
         lines = [line for block in blocks for line in block]
 
         self.assertIn("## `func Service.Run`", lines)
-        self.assertIn("  - [Service.Run](#markdown-header-func-service-run)", lines)
+        self.assertIn("  - [Service.Run](#markdown-header-func-servicerun)", lines)
 
 
 if __name__ == "__main__":
