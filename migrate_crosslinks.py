@@ -7,11 +7,15 @@ import sys
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
+from go_template.anchor_utils import (
+    ANCHOR_STYLE_BITBUCKET,
+    ANCHOR_STYLE_COMMONMARK,
+    function_anchor_fragment,
+)
+
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 LABEL_WITH_FILE_RE = re.compile(r"^(?P<name>.+?)\s*\((?P<file>[^)]+)\)$")
-ANCHOR_STYLE_BITBUCKET = "bitbucket"
-ANCHOR_STYLE_COMMONMARK = "commonmark"
 
 
 def _collect_targets(target: Path) -> List[Path]:
@@ -22,32 +26,6 @@ def _collect_targets(target: Path) -> List[Path]:
             if path.is_file() and path.suffix.lower() == ".md"
         )
     return [target]
-
-
-def _slugify_bitbucket_anchor(text: str) -> str:
-    text = text.replace("`", "").strip().lower()
-    text = re.sub(r"\s+", "-", text)
-    text = re.sub(r"[^a-z0-9-]", "", text)
-    text = re.sub(r"-{2,}", "-", text).strip("-")
-    return text or "func"
-
-
-def _slugify_common_anchor(text: str) -> str:
-    text = text.replace("`", "").strip().lower()
-    text = re.sub(r"[^a-z0-9]+", "-", text)
-    text = re.sub(r"-{2,}", "-", text).strip("-")
-    return text or "func"
-
-
-def _anchor_fragment(name: str, style: str) -> str:
-    slug = (
-        _slugify_bitbucket_anchor(name)
-        if style == ANCHOR_STYLE_BITBUCKET
-        else _slugify_common_anchor(name)
-    )
-    if style == ANCHOR_STYLE_BITBUCKET:
-        return f"markdown-header-func-{slug}"
-    return f"func-{slug}"
 
 
 def _normalize_relation_target_name(name: str) -> str:
@@ -86,7 +64,7 @@ def _rewrite_anchor_target(target: str, label: str, style: str) -> Tuple[str, in
 
     prefix = target[:hash_idx]
     target_name = _extract_target_name_from_label(label)
-    updated_fragment = _anchor_fragment(target_name, style)
+    updated_fragment = function_anchor_fragment(target_name, style)
     updated_target = f"{prefix}#{updated_fragment}"
     if updated_target == target:
         return target, 0

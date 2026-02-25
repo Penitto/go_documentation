@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from go_template.generator import _prepare_render_inputs
+from go_template.generator import _infer_read_write_vars, _prepare_render_inputs
 
 
 class TestReadWriteSelectors(unittest.TestCase):
@@ -33,6 +33,29 @@ class TestReadWriteSelectors(unittest.TestCase):
         self.assertIn("task.Payload.Info.Metrics.Score", update["read_vars"])
 
         self.assertIn("task.Payload.Info.Metrics.Score", read["read_vars"])
+
+    def test_selector_with_index_keeps_root_object(self) -> None:
+        func = {
+            "body": """
+{
+    req.Tasks[i].Todo = payload
+    _ = req.Tasks[i].Todo
+}
+""",
+        }
+        read_vars, write_vars = _infer_read_write_vars(
+            func,
+            global_vars=[],
+            global_consts=[],
+            type_names=[],
+            import_aliases=[],
+            function_names=[],
+        )
+
+        self.assertIn("req.Tasks[i].Todo", write_vars)
+        self.assertIn("req.Tasks[i].Todo", read_vars)
+        self.assertNotIn("Tasks[i].Todo", write_vars)
+        self.assertNotIn("Tasks[i].Todo", read_vars)
 
 
 if __name__ == "__main__":

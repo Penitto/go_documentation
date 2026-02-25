@@ -21,7 +21,6 @@ from .template_renderer import render_template, render_template_blocks
 
 FUNC_HEADER_PATTERN = re.compile(r"^### `func\s+(.+?)`$")
 IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-SELECTOR_PATTERN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(\.\s*[A-Za-z_][A-Za-z0-9_]*)+")
 ASSIGN_OP_PATTERN = re.compile(r":=|<<=|>>=|&\^=|\+=|-=|\*=|/=|%=|&=|\|=|\^=|=")
 INC_DEC_PATTERN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*(\+\+|--)")
 PREDECLARED_TYPES = {
@@ -248,10 +247,79 @@ def _extract_identifiers(expr: str) -> Iterable[str]:
 
 
 def _extract_selector_names(expr: str) -> Iterable[str]:
-    for match in SELECTOR_PATTERN.finditer(expr):
-        raw = match.group(0)
-        normalized = re.sub(r"\s+", "", raw)
-        yield normalized
+    i = 0
+    length = len(expr)
+    while i < length:
+        if not (expr[i].isalpha() or expr[i] == "_"):
+            i += 1
+            continue
+        if i > 0 and (expr[i - 1].isalnum() or expr[i - 1] in "_."):
+            i += 1
+            continue
+
+        start = i
+        i += 1
+        while i < length and (expr[i].isalnum() or expr[i] == "_"):
+            i += 1
+
+        end = i
+        cursor = i
+        has_dot_segment = False
+
+        while cursor < length:
+            next_cursor = _skip_spaces(expr, cursor)
+            if next_cursor >= length:
+                break
+
+            if expr[next_cursor] == ".":
+                name_start = _skip_spaces(expr, next_cursor + 1)
+                if name_start >= length or not (expr[name_start].isalpha() or expr[name_start] == "_"):
+                    break
+                name_end = name_start + 1
+                while name_end < length and (expr[name_end].isalnum() or expr[name_end] == "_"):
+                    name_end += 1
+                end = name_end
+                cursor = name_end
+                has_dot_segment = True
+                continue
+
+            if expr[next_cursor] == "[":
+                bracket_end = _find_matching_bracket(expr, next_cursor)
+                if bracket_end == -1:
+                    break
+                end = bracket_end + 1
+                cursor = bracket_end + 1
+                continue
+
+            break
+
+        if has_dot_segment:
+            raw = expr[start:end]
+            yield re.sub(r"\s+", "", raw)
+        i = max(i, end)
+
+
+def _skip_spaces(expr: str, idx: int) -> int:
+    while idx < len(expr) and expr[idx].isspace():
+        idx += 1
+    return idx
+
+
+def _find_matching_bracket(expr: str, start_idx: int) -> int:
+    if start_idx >= len(expr) or expr[start_idx] != "[":
+        return -1
+    depth = 0
+    i = start_idx
+    while i < len(expr):
+        ch = expr[i]
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
 
 
 def _infer_read_write_vars(

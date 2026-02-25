@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from go_template.anchor_utils import header_anchor_fragment
+
 
 FUNC_NAME_RE = re.compile(r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)")
 LINK_RE = re.compile(r"\[[^\]]+\]\([^)]+\)")
@@ -21,16 +23,6 @@ RELATION_HEADERS = {
     "взаимосвязь с другими функциями из других файлов": RELATION_OTHER,
 }
 SKIP_ITEMS = {"нет", "<нет>"}
-ANCHOR_STYLE_ENV = "GO_DOC_ANCHOR_STYLE"
-ANCHOR_STYLE_BITBUCKET = "bitbucket"
-ANCHOR_STYLE_COMMONMARK = "commonmark"
-
-
-def _anchor_style() -> str:
-    raw = os.getenv(ANCHOR_STYLE_ENV, "").strip().lower()
-    if raw in {"commonmark", "standard", "vscode"}:
-        return ANCHOR_STYLE_COMMONMARK
-    return ANCHOR_STYLE_BITBUCKET
 
 
 @dataclass
@@ -84,23 +76,6 @@ def _extract_func_name(header_text: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def _slugify_heading(text: str) -> str:
-    value = text.replace("`", "").lower()
-    if _anchor_style() == ANCHOR_STYLE_BITBUCKET:
-        value = re.sub(r"\s+", "-", value)
-        value = re.sub(r"[^a-z0-9-]", "", value)
-    else:
-        value = re.sub(r"[^a-z0-9]+", "-", value)
-    return value.strip("-")
-
-
-def _anchor_fragment_from_header(header_text: str) -> str:
-    slug = _slugify_heading(header_text)
-    if _anchor_style() == ANCHOR_STYLE_BITBUCKET:
-        return f"markdown-header-{slug}"
-    return slug
-
-
 def _collect_doc_files(root: Path) -> List[Path]:
     return sorted(path.resolve() for path in root.rglob("*.doc.md"))
 
@@ -135,7 +110,7 @@ def _build_index(doc_files: Iterable[Path]) -> DocIndex:
             func_name = _extract_func_name(header_text)
             if not func_name:
                 continue
-            anchor = _anchor_fragment_from_header(header_text)
+            anchor = header_anchor_fragment(header_text)
             func_map[func_name] = anchor
             by_func.setdefault(func_name, []).append(doc_path)
         by_doc[doc_path] = func_map
